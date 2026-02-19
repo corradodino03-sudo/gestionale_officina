@@ -1,0 +1,86 @@
+# docker-compose.yml - Configurazione orchestrazione servizi
+# Progetto: Garage Manager (Gestionale Officina)
+
+services:
+  # ============================================================
+  # Servizio Database PostgreSQL
+  # ============================================================
+  db:
+    image: postgres:16-alpine
+    container_name: garage-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-garage_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-garage_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-garage_user} -d ${POSTGRES_DB:-garage_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - garage-network
+
+  # ============================================================
+  # Servizio Backend FastAPI
+  # ============================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: garage-backend
+    restart: unless-stopped
+    environment:
+      # Database - puntamento al servizio db
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-garage_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-garage_db}
+      # Configurazione applicazione
+      APP_ENV: ${APP_ENV:-development}
+      SECRET_KEY: ${SECRET_KEY:-changeme-in-production}
+      DEBUG: ${DEBUG:-true}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - garage-network
+    volumes:
+      - ./backend:/app
+    # Variabili di ambiente ereditate dal .env
+
+  # ============================================================
+  # Servizio Frontend (placeholder - implementazione futura)
+  # ============================================================
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: garage-frontend
+  #   restart: unless-stopped
+  #   ports:
+  #     - "${FRONTEND_PORT:-3000}:80"
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - garage-network
+
+# ============================================================
+# Reti di comunicazione
+# ============================================================
+networks:
+  garage-network:
+    driver: bridge
+    name: garage-network
+
+# ============================================================
+# Volumi per persistenza dati
+# ============================================================
+volumes:
+  postgres_data:
+    name: postgres_data

@@ -28,6 +28,8 @@ class Base(DeclarativeBase):
 
 # Import modelli implementati
 from app.models.client import Client
+from app.models.vehicle import Vehicle
+from app.models.work_order import WorkOrder, WorkOrderItem
 
 # Placeholder per import modelli futuri
 # from app.models.vehicle import Vehicle
@@ -39,9 +41,9 @@ from app.models.client import Client
 __all__ = [
     "Base",
     "Client",
-    # "Vehicle",
-    # "WorkOrder",
-    # "WorkOrderItem",
+    "Vehicle",
+    "WorkOrder",
+    "WorkOrderItem",
     # "Part",
     # "PartUsage",
     # "StockMovement",

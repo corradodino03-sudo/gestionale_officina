@@ -5,9 +5,10 @@ Progetto: Garage Manager (Gestionale Officina)
 Definisce le impostazioni dell'applicazione caricate da variabili d'ambiente.
 """
 
-from typing import List
+from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +35,16 @@ class Settings(BaseSettings):
         description="URL connessione database PostgreSQL (formato async)",
     )
 
+    db_pool_size: int = Field(
+        default=5,
+        description="Numero connessioni permanenti nel pool",
+    )
+
+    db_max_overflow: int = Field(
+        default=10,
+        description="Connessioni extra temporanee oltre pool_size",
+    )
+
     # ------------------------------------------------------------
     # Configurazione Applicazione
     # ------------------------------------------------------------
@@ -47,9 +58,9 @@ class Settings(BaseSettings):
         description="Versione applicazione",
     )
 
-    app_env: str = Field(
+    app_env: Literal["development", "production", "testing"] = Field(
         default="development",
-        description="Ambiente di esecuzione (development | production)",
+        description="Ambiente di esecuzione (development | production | testing)",
     )
 
     debug: bool = Field(
@@ -62,6 +73,17 @@ class Settings(BaseSettings):
         description="Chiave segreta per sessioni/token",
     )
 
+    @field_validator("secret_key")
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        if v == "changeme-in-production":
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "⚠️  SECRET_KEY non impostata — usa un valore sicuro in produzione"
+            )
+        return v
+
     backend_port: int = Field(
         default=8000,
         description="Porta backend",
@@ -70,15 +92,18 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------
     # Configurazione CORS
     # ------------------------------------------------------------
-    cors_origins: List[str] = Field(
-        default=["http://localhost:3000", "http://127.0.0.1:3000"],
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
         description="Origini CORS permesse",
     )
 
     # ------------------------------------------------------------
     # Configurazione Logging
     # ------------------------------------------------------------
-    log_level: str = Field(
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",
         description="Livello logging",
     )
@@ -140,5 +165,20 @@ class Settings(BaseSettings):
         return self.app_env == "development"
 
 
-# Istanza globale delle impostazioni
-settings = Settings()
+@lru_cache()
+def get_settings() -> Settings:
+    """
+    Restituisce l'istanza singleton delle impostazioni.
+
+    Usa lru_cache per garantire che Settings() venga istanziato
+    una sola volta e riutilizzato in tutta l'applicazione.
+    In fase di test, usa get_settings.cache_clear() per resettare.
+
+    Returns:
+        Settings: Istanza delle impostazioni applicazione
+    """
+    return Settings()
+
+
+# Istanza globale per compatibilità con import diretti
+settings = get_settings()

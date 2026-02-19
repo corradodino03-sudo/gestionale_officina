@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.exceptions import DuplicateError, NotFoundError
+from app.core.exceptions import NotFoundError
 from app.schemas.client import (
     ClientCreate,
     ClientList,
@@ -128,9 +128,10 @@ async def create_client(
         ClientRead: Dettagli del cliente creato
         
     Raises:
-        DuplicateError: Se il tax_id è già in uso
+        409 Conflict: Se il tax_id è già in uso
     """
     client = await client_service.create(db=db, client_data=client_data)
+    await db.commit()
     return ClientRead.model_validate(client)
 
 
@@ -160,13 +161,14 @@ async def update_client(
         
     Raises:
         NotFoundError: Se il cliente non esiste
-        DuplicateError: Se il tax_id è già in uso
+        409 Conflict: Se il tax_id è già in uso
     """
     client = await client_service.update(
         db=db,
         client_id=client_id,
         client_data=client_data,
     )
+    await db.commit()
     return ClientRead.model_validate(client)
 
 
@@ -192,4 +194,4 @@ async def delete_client(
         NotFoundError: Se il cliente non esiste
     """
     await client_service.delete(db=db, client_id=client_id)
-    return None
+    await db.commit()

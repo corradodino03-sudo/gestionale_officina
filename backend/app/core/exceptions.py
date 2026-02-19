@@ -1,10 +1,22 @@
 """
-Eccezioni Custom per l'applicazione
+Eccezioni Custom per l'applicazione.
 Progetto: Garage Manager (Gestionale Officina)
 
 Definisce eccezioni specifiche del dominio per una gestione
 centralizzata degli errori.
+
+NOTA: BusinessValidationError è volutamente distinta da pydantic.ValidationError.
+- pydantic.ValidationError: errori di formato/tipo nei dati di input (gestiti da FastAPI → 422)
+- BusinessValidationError: violazioni delle regole di business logic (gestiti dal nostro handler → 422)
 """
+
+__all__ = [
+    "AppException",
+    "NotFoundError",
+    "DuplicateError",
+    "BusinessValidationError",
+    "ConflictError",
+]
 
 
 class AppException(Exception):
@@ -59,16 +71,23 @@ class DuplicateError(AppException):
         super().__init__(detail)
 
 
-class ValidationError(AppException):
+class BusinessValidationError(AppException):
     """
-    Eccezione sollevata per errori di validazione dei dati.
+    Eccezione sollevata per violazioni delle regole di business logic.
     
-    Utilizzata quando i dati forniti non soddisfano i vincoli di business logic.
+    NON confondere con pydantic.ValidationError che gestisce
+    la validazione dello schema/formato dei dati in input.
+    
+    Esempi di utilizzo:
+        - "Il veicolo non appartiene al cliente selezionato"
+        - "Solo ordini in bozza possono essere eliminati"
+        - "Giacenza insufficiente per lo scarico richiesto"
+        - "Transizione di stato non consentita"
     """
 
     def __init__(self, detail: str = "Validazione dati fallita") -> None:
         """
-        Inizializza l'eccezione ValidationError.
+        Inizializza l'eccezione BusinessValidationError.
         
         Args:
             detail: Messaggio di errore (default: "Validazione dati fallita")

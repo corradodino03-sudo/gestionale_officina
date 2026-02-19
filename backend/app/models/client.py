@@ -5,14 +5,13 @@ Progetto: Garage Manager (Gestionale Officina)
 Rappresenta l'anagrafica dei clienti (persone fisiche e giuridiche).
 """
 
-import uuid
 from typing import TYPE_CHECKING, List
 
-from sqlalchemy import Boolean, Index, String, Text, Uuid
+from sqlalchemy import Boolean, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
-from app.models.mixins import TimestampMixin
+from app.models.mixins import TimestampMixin, UUIDMixin
 
 # Import per type hinting relazioni (evita circular import)
 if TYPE_CHECKING:
@@ -20,7 +19,7 @@ if TYPE_CHECKING:
     from app.models.work_order import WorkOrder
 
 
-class Client(Base, TimestampMixin):
+class Client(Base, UUIDMixin, TimestampMixin):
     """
     Modello per l'anagrafica clienti.
     
@@ -49,16 +48,6 @@ class Client(Base, TimestampMixin):
     """
 
     __tablename__ = "clients"
-
-    # ------------------------------------------------------------
-    # Colonne Primary Key
-    # ------------------------------------------------------------
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid,
-        primary_key=True,
-        default=uuid.uuid4,
-        doc="UUID primary key",
-    )
 
     # ------------------------------------------------------------
     # Colonne Dati Anagrafici
@@ -146,14 +135,14 @@ class Client(Base, TimestampMixin):
     vehicles: Mapped[List["Vehicle"]] = relationship(
         "Vehicle",
         back_populates="client",
-        lazy="selectin",
+        lazy="noload",
         doc="Veicoli associati al cliente",
     )
 
     work_orders: Mapped[List["WorkOrder"]] = relationship(
         "WorkOrder",
         back_populates="client",
-        lazy="selectin",
+        lazy="noload",
         doc="Ordini di lavoro associati al cliente",
     )
 

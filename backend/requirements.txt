@@ -4,6 +4,10 @@
 # Versioni pinnate per produzione
 # ============================================================
 
+# Python >= 3.11 richiesto
+# Sintassi X | None nei modelli SQLAlchemy richiede Python 3.10+
+# Si raccomanda Python 3.11 per supporto LTS
+
 # ------------------------------------------------------------
 # FRAMEWORK FASTAPI
 # ------------------------------------------------------------

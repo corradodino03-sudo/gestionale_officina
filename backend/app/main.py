@@ -15,10 +15,10 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.database import close_db, init_db
 from app.core.exceptions import (
+    BusinessValidationError,
     ConflictError,
     DuplicateError,
     NotFoundError,
-    ValidationError,
 )
 
 # ------------------------------------------------------------
@@ -60,10 +60,10 @@ async def duplicate_exception_handler(request: Request, exc: DuplicateError) -> 
     )
 
 
-@app.exception_handler(ValidationError)
-async def validation_exception_handler(request: Request, exc: ValidationError) -> JSONResponse:
+@app.exception_handler(BusinessValidationError)
+async def business_validation_handler(request: Request, exc: BusinessValidationError) -> JSONResponse:
     """
-    Gestore per eccezioni ValidationError.
+    Gestore per eccezioni BusinessValidationError.
     
     Converte l'eccezione in risposta HTTP 422.
     """

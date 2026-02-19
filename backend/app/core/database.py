@@ -28,8 +28,8 @@ engine: AsyncEngine = create_async_engine(
     settings.database_url,
     echo=settings.debug,  # Log query in modalità debug
     pool_pre_ping=True,   # Verifica connessione prima di usarla
-    pool_size=5,          # Dimensione pool connessioni
-    max_overflow=10,      # Connessioni extra oltre pool_size
+    pool_size=settings.db_pool_size,      # Dimensione pool connessioni
+    max_overflow=settings.db_max_overflow,  # Connessioni extra oltre pool_size
 )
 
 
@@ -63,7 +63,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise
@@ -84,7 +83,7 @@ async def init_db() -> None:
             await conn.execute(text("SELECT 1"))
         logger.info("Connessione al database stabilita con successo")
     except Exception as e:
-        logger.error(f"Errore connessione database: {e}")
+        logger.error("Errore connessione database: %s", e)
         raise
 
 

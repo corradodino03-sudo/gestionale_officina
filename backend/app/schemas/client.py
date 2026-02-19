@@ -29,10 +29,10 @@ def normalize_phone(phone: Optional[str]) -> Optional[str]:
     """
     Normalizza il numero di telefono.
     
-    Rimuove spazi e accetta solo +, numeri e spazi.
+    R e accetta solo +, numeri e spazi.
     
     Args:
-        phone: Numero di telefono da normalizzare
+       imuove spazi phone: Numero di telefono da normalizzare
         
     Returns:
         Numero di telefono normalizzato o None
@@ -212,7 +212,8 @@ class ClientValidatorsMixin(BaseModel):
     con i propri tipi e default.
     """
     
-    # Campi dichiarati per far funzionare i validator
+    # Campi dichiarati per far funzionare i validator senza check_fields=False
+    # Pydantic v2 usa check_fields=True come default
     tax_id: Optional[str] = None
     phone: Optional[str] = None
     province: Optional[str] = None
@@ -238,6 +239,7 @@ class ClientBase(ClientValidatorsMixin):
     Include tutti i campi condivisi tra creazione e aggiornamento.
     """
 
+    # P0-2: Aggiunto model_config per supportare conversione ORM → Pydantic
     model_config = ConfigDict(from_attributes=True)
 
     name: str = Field(
@@ -326,7 +328,7 @@ class ClientUpdate(ClientValidatorsMixin):
     """
     Schema per l'aggiornamento di un cliente esistente.
     
-    Tutti i campi sono opzionali per supportare update parziali.
+    Tutti i campi sono opzionali per supportare update parziali (PATCH).
     """
 
     name: Optional[str] = Field(
@@ -458,13 +460,14 @@ class ClientList(BaseModel):
         description="Numero elementi per pagina",
     )
 
+    # P1-3: Usato @computed_field invece di @model_validator per total_pages
     @computed_field
-    @property
     def total_pages(self) -> int:
         """
         Numero totale di pagine.
         
-        Calcolato automaticamente in base a total e per_page.
+        Calcolato automaticamente in base a total e per_page usando
+        la formula: ceil(total / per_page)
         
         Returns:
             Numero totale di pagine

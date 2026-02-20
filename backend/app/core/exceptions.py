@@ -10,6 +10,8 @@ NOTA: BusinessValidationError è volutamente distinta da pydantic.ValidationErro
 - BusinessValidationError: violazioni delle regole di business logic (gestiti dal nostro handler → 422)
 """
 
+from typing import Any, Dict, Optional
+
 __all__ = [
     "AppException",
     "NotFoundError",
@@ -24,16 +26,37 @@ class AppException(Exception):
     Base exception per l'applicazione.
     
     Tutte le eccezioni custom ereditano da questa classe base.
+    
+    Attributes:
+        status_code: HTTP status code da restituire al client
+        error_code: Identificativo univoco dell'errore per il frontend
+        detail: Messaggio di errore leggibile per l'utente
+        extra: Dizionario con dati aggiuntivi per il frontend
     """
 
-    def __init__(self, detail: str) -> None:
+    # Default values - overridden in subclasses
+    status_code: int = 500
+    error_code: str = "INTERNAL_SERVER_ERROR"
+
+    def __init__(
+        self,
+        detail: str,
+        error_code: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
         Inizializza l'eccezione.
         
         Args:
             detail: Messaggio di errore dettagliato
+            error_code: Identificativo univoco (default: quello di classe)
+            extra: Dati aggiuntivi da passare al frontend (default: None)
         """
         self.detail = detail
+        # Use provided error_code or fall back to class-level default
+        self.error_code = error_code if error_code is not None else self.error_code
+        self.extra = extra if extra is not None else None
+        self.status_code = self.__class__.status_code
         super().__init__(detail)
 
 
@@ -44,14 +67,24 @@ class NotFoundError(AppException):
     Utilizzata quando un'entità cercata non esiste nel database.
     """
 
-    def __init__(self, detail: str = "Risorsa non trovata") -> None:
+    status_code: int = 404
+    error_code: str = "RESOURCE_NOT_FOUND"
+
+    def __init__(
+        self,
+        detail: str = "Risorsa non trovata",
+        error_code: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
         Inizializza l'eccezione NotFoundError.
         
         Args:
             detail: Messaggio di errore (default: "Risorsa non trovata")
+            error_code: Identificativo univoco (default: "RESOURCE_NOT_FOUND")
+            extra: Dati aggiuntivi da passare al frontend (default: None)
         """
-        super().__init__(detail)
+        super().__init__(detail, error_code, extra)
 
 
 class DuplicateError(AppException):
@@ -61,14 +94,24 @@ class DuplicateError(AppException):
     Utilizzata per violazioni di vincoli unique (es. codice fiscale già esistente).
     """
 
-    def __init__(self, detail: str = "Risorsa già esistente") -> None:
+    status_code: int = 409
+    error_code: str = "DUPLICATE_RESOURCE"
+
+    def __init__(
+        self,
+        detail: str = "Risorsa già esistente",
+        error_code: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
         Inizializza l'eccezione DuplicateError.
         
         Args:
             detail: Messaggio di errore (default: "Risorsa già esistente")
+            error_code: Identificativo univoco (default: "DUPLICATE_RESOURCE")
+            extra: Dati aggiuntivi da passare al frontend (default: None)
         """
-        super().__init__(detail)
+        super().__init__(detail, error_code, extra)
 
 
 class BusinessValidationError(AppException):
@@ -85,14 +128,24 @@ class BusinessValidationError(AppException):
         - "Transizione di stato non consentita"
     """
 
-    def __init__(self, detail: str = "Validazione dati fallita") -> None:
+    status_code: int = 422
+    error_code: str = "BUSINESS_VALIDATION_ERROR"
+
+    def __init__(
+        self,
+        detail: str = "Validazione dati fallita",
+        error_code: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
         Inizializza l'eccezione BusinessValidationError.
         
         Args:
             detail: Messaggio di errore (default: "Validazione dati fallita")
+            error_code: Identificativo univoco (default: "BUSINESS_VALIDATION_ERROR")
+            extra: Dati aggiuntivi da passare al frontend (default: None)
         """
-        super().__init__(detail)
+        super().__init__(detail, error_code, extra)
 
 
 class ConflictError(AppException):
@@ -103,11 +156,21 @@ class ConflictError(AppException):
     a causa dello stato corrente della risorsa.
     """
 
-    def __init__(self, detail: str = "Conflitto di stato") -> None:
+    status_code: int = 409
+    error_code: str = "CONFLICT_STATE"
+
+    def __init__(
+        self,
+        detail: str = "Conflitto di stato",
+        error_code: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
         Inizializza l'eccezione ConflictError.
         
         Args:
             detail: Messaggio di errore (default: "Conflitto di stato")
+            error_code: Identificativo univoco (default: "CONFLICT_STATE")
+            extra: Dati aggiuntivi da passare al frontend (default: None)
         """
-        super().__init__(detail)
+        super().__init__(detail, error_code, extra)

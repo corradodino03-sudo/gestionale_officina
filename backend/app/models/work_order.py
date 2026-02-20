@@ -2,7 +2,7 @@
 Modelli SQLAlchemy per gli Ordini di Lavoro
 Progetto: Garage Manager (Gestionale Officina)
 
-Contiene:
+ Contiene:
 - WorkOrder: Ordine di lavoro principale
 - WorkOrderItem: Voci di lavoro (manodopera/interventi) associate all'ordine
 """
@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, Uuid
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
@@ -70,6 +71,7 @@ class WorkOrder(Base, UUIDMixin, TimestampMixin):
         Uuid,
         ForeignKey("clients.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
         doc="UUID del cliente proprietario del veicolo",
     )
 
@@ -77,6 +79,7 @@ class WorkOrder(Base, UUIDMixin, TimestampMixin):
         Uuid,
         ForeignKey("vehicles.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
         doc="UUID del veicolo oggetto dell'intervento",
     )
 
@@ -158,21 +161,22 @@ class WorkOrder(Base, UUIDMixin, TimestampMixin):
     )
 
     # ------------------------------------------------------------
-    # Indici
+    # Indici e Vincoli
     # ------------------------------------------------------------
     __table_args__ = (
         # Indice su status (filtro più frequente)
         Index("ix_work_orders_status", "status"),
-        # Indice su client_id
-        Index("ix_work_orders_client_id", "client_id"),
-        # Indice su vehicle_id
-        Index("ix_work_orders_vehicle_id", "vehicle_id"),
         # Indice composto per dashboard (status + data creazione)
         Index("ix_work_orders_status_created", "status", "created_at"),
         # Vincolo di check sullo stato
         CheckConstraint(
             "status IN ('draft', 'in_progress', 'waiting_parts', 'completed', 'invoiced', 'cancelled')",
             name="ck_work_orders_status",
+        ),
+        # Vincolo di check sui chilometri: km_out >= km_in (gestione NULL)
+        CheckConstraint(
+            "(km_out IS NULL OR km_in IS NULL OR km_out >= km_in)",
+            name="ck_work_orders_km",
         ),
     )
 
@@ -216,12 +220,13 @@ class WorkOrderItem(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "work_order_items"
 
     # ------------------------------------------------------------
-    # Colonne Relazione
+    # Colonna Relazione
     # ------------------------------------------------------------
     work_order_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         ForeignKey("work_orders.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
         doc="UUID dell'ordine di lavoro padre",
     )
 
@@ -264,11 +269,9 @@ class WorkOrderItem(Base, UUIDMixin, TimestampMixin):
     )
 
     # ------------------------------------------------------------
-    # Indici
+    # Indici e Vincoli
     # ------------------------------------------------------------
     __table_args__ = (
-        # Indice su work_order_id per ricerca voci di un ordine
-        Index("ix_work_order_items_work_order_id", "work_order_id"),
         # Vincolo di check sul tipo di voce
         CheckConstraint(
             "item_type IN ('labor', 'service')",
@@ -277,9 +280,9 @@ class WorkOrderItem(Base, UUIDMixin, TimestampMixin):
     )
 
     # ------------------------------------------------------------
-    # Properties Calcolate
+    # Hybrid Properties Calcolate
     # ------------------------------------------------------------
-    @property
+    @hybrid_property
     def line_total(self) -> Decimal:
         """
         Totale della riga (quantity * unit_price).
@@ -288,6 +291,19 @@ class WorkOrderItem(Base, UUIDMixin, TimestampMixin):
             Decimal: Quantità * Prezzo unitario
         """
         return self.quantity * self.unit_price
+
+    @line_total.expression
+    def line_total(cls) -> Numeric:
+        """
+        Espressione SQL per il totale della riga.
+        Permette operazioni di query/aggregazione a livello di database.
+        
+        Returns:
+            Numeric: Espressione quantity * unit_price
+        """
+        from sqlalchemy import cast
+
+        return cast(cls.quantity * cls.unit_price, Numeric(10, 2))
 
     # ------------------------------------------------------------
     # Metodi

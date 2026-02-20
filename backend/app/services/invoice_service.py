@@ -37,6 +37,7 @@ from app.schemas.invoice import (
     DepositStatus,
 )
 from app.core.config import settings
+from app.services.deposit_service import DepositService
 
 # Logger per questo modulo
 logger = logging.getLogger(__name__)
@@ -488,7 +489,6 @@ class InvoiceService:
         final_invoice = await self.get_by_id(db, invoice.id)
         
         # Controllare se esistono caparre pending (FEAT 2)
-        from app.services.deposit_service import DepositService
         deposits = await DepositService.get_by_client(final_invoice.client_id, db)
         
         pending_deposits = [
@@ -624,10 +624,15 @@ class InvoiceService:
         if conditions:
             stmt = stmt.where(and_(*conditions))
         
-        # P0-Fix 2: Se ci sono filtri calcolati (status/overdue), recupera tutto e filtra in Python
-        needs_python_filter = bool(status_filter) or overdue_only
+        # P0-Fix 2: Se c'è status_filter, recupera tutto e filtra in Python
+        # NOTA: status è computed property, filtro in Python — da ottimizzare con colonna persistita in futuro
+        #overdue_only ha già filtro SQL diretto (Invoice.due_date < today), non serve più filtro Python
+        needs_python_filter = bool(status_filter)
         
         if needs_python_filter:
+            # Protezione temporanea: limita caricamento a 1000 record massimi
+            stmt = stmt.limit(1000)
+            
             # Recupera TUTTE le fatture che soddisfano i filtri SQL
             result = await db.execute(stmt.order_by(Invoice.invoice_date.desc()))
             invoices = result.scalars().all()
@@ -643,10 +648,6 @@ class InvoiceService:
                 target_status = status_map.get(status_filter)
                 if target_status:
                     invoices = [inv for inv in invoices if inv.status == target_status]
-            
-            # Filtra overdue in Python
-            if overdue_only:
-                invoices = [inv for inv in invoices if inv.is_overdue]
             
             # Paginazione manuale
             total = len(invoices)
@@ -1166,67 +1167,6 @@ class InvoiceService:
         await db.delete(payment)
         await db.commit()
 
-    # Mantiene la vecchia signature per retrocompatibilità
-    async def add_payment(
-        self,
-        db: AsyncSession,
-        invoice_id: uuid.UUID,
-        payment_data: PaymentCreate,
-    ) -> Payment:
-        """
-        Registra un pagamento su una fattura (retrocompatibilità).
-        
-        DEPRECATA: Usa create_payment con allocation_strategy='manual'.
-        
-        Args:
-            db: Sessione database
-            invoice_id: UUID della fattura
-            payment_data: Dati del pagamento
-            
-        Returns:
-            Payment: Il pagamento registrato
-        """
-        # Recupera la fattura per ottenere il client_id
-        stmt = select(Invoice).where(Invoice.id == invoice_id)
-        result = await db.execute(stmt)
-        invoice = result.scalar_one_or_none()
-        
-        if not invoice:
-            raise NotFoundError(f"Fattura {invoice_id} non trovata")
-        
-        # Crea un PaymentCreate con allocazione manuale
-        payment_create = PaymentCreate(
-            client_id=invoice.client_id,
-            amount=payment_data.amount,
-            payment_date=payment_data.payment_date,
-            payment_method=payment_data.payment_method,
-            reference=payment_data.reference,
-            notes=payment_data.notes,
-            allocation_strategy="manual",
-            allocations=[
-                PaymentAllocationCreate(
-                    invoice_id=invoice_id,
-                    amount=payment_data.amount
-                )
-            ]
-        )
-        
-        return await self.create_payment(db, payment_create)
-
-    async def remove_payment(
-        self,
-        db: AsyncSession,
-        payment_id: uuid.UUID,
-    ) -> None:
-        """
-        Rimuove un pagamento (es. per errore di registrazione).
-        
-        Args:
-            db: Sessione database
-            payment_id: UUID del pagamento
-        """
-        await self.delete_payment(db, payment_id)
-
     async def get_overdue_invoices(
         self,
         db: AsyncSession,
@@ -1311,6 +1251,9 @@ class InvoiceService:
         payments_count, total_paid = payment_result.one()
         
         # Totale residuo (tutte le fatture non pagate completamente)
+        # NOTA: remaining_amount è computed property, non calcolabile via SQL.
+        # Con volumi elevati questo può essere lento — da ottimizzare con
+        # colonna persistita in futuro. Protezione: limitato al periodo richiesto.
         unpaid_stmt = (
             select(Invoice)
             .options(selectinload(Invoice.payment_allocations))

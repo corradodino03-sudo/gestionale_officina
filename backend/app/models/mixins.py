@@ -8,10 +8,31 @@ Mixin riutilizzabili per aggiungere funzionalità comuni ai modelli.
 import datetime
 import uuid
 
-from sqlalchemy import DateTime, Uuid
+from sqlalchemy import Boolean, DateTime, Uuid
 from sqlalchemy import event
 from sqlalchemy.orm import Mapped, mapped_column, Session
 from sqlalchemy.sql import func
+
+
+class SoftDeleteMixin:
+    """
+    Mixin per implementare la cancellazione logica (soft delete).
+    
+    Aggiunge il campo is_active che, se impostato a False,
+    indica che il record è stato "eliminato" ma non rimosso fisicamente.
+    
+    Usage:
+        class MyModel(Base, SoftDeleteMixin):
+            __tablename__ = "my_table"
+            ...
+    """
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        doc="Flag per soft delete: False = eliminato, True = attivo",
+    )
 
 
 class TimestampMixin:

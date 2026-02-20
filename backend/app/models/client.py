@@ -11,15 +11,16 @@ from sqlalchemy import Boolean, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
-from app.models.mixins import TimestampMixin, UUIDMixin
+from app.models.mixins import TimestampMixin, UUIDMixin, SoftDeleteMixin
 
 # Import per type hinting relazioni (evita circular import)
 if TYPE_CHECKING:
     from app.models.vehicle import Vehicle
     from app.models.work_order import WorkOrder
+    from app.models.invoice import Invoice, Payment
 
 
-class Client(Base, UUIDMixin, TimestampMixin):
+class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """
     Modello per l'anagrafica clienti.
     
@@ -130,6 +131,80 @@ class Client(Base, UUIDMixin, TimestampMixin):
     )
 
     # ------------------------------------------------------------
+    # Colonne Dati Esteri
+    # ------------------------------------------------------------
+    country_code: Mapped[str | None] = mapped_column(
+        String(2),
+        nullable=True,
+        default="IT",
+        doc="Codice ISO 3166-1 alpha-2 del paese",
+    )
+
+    is_foreign: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="True se cliente estero, attiva logiche esenzione IVA",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne Fatturazione Elettronica (SDI)
+    # ------------------------------------------------------------
+    sdi_code: Mapped[str | None] = mapped_column(
+        String(7),
+        nullable=True,
+        doc="Codice Destinatario SDI (7 caratteri). '0000000' per PEC, 'XXXXXXX' per esteri",
+    )
+
+    pec: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        doc="PEC per fatturazione elettronica",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne Regime Fiscale
+    # ------------------------------------------------------------
+    vat_regime: Mapped[str | None] = mapped_column(
+        String(5),
+        nullable=True,
+        default="RF01",
+        doc="Regime fiscale: RF01=Ordinario, RF02=Minimi, RF04=Agricoltura, RF19=Forfettario",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne Regime IVA / Esenzione
+    # ------------------------------------------------------------
+    vat_exemption: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="True se il cliente è esente IVA",
+    )
+
+    vat_exemption_code: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+        doc="Codice natura esenzione: N1, N2, N2.1, N2.2, N3, N3.1, N3.5, N4, N5, N6, N6.1, N6.9, N7",
+    )
+
+    vat_exemption_reason: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        doc="Descrizione testuale del motivo esenzione",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne Regime Pagamento Speciale
+    # ------------------------------------------------------------
+    split_payment: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="True per enti pubblici soggetti a split payment",
+    )
+
+    # ------------------------------------------------------------
     # Relationships
     # ------------------------------------------------------------
     vehicles: Mapped[List["Vehicle"]] = relationship(
@@ -146,12 +221,28 @@ class Client(Base, UUIDMixin, TimestampMixin):
         doc="Ordini di lavoro associati al cliente",
     )
 
+    invoices: Mapped[List["Invoice"]] = relationship(
+        "Invoice",
+        back_populates="client",
+        lazy="noload",
+        doc="Fatture associate al cliente",
+    )
+
+    payments: Mapped[List["Payment"]] = relationship(
+        "Payment",
+        back_populates="client",
+        lazy="noload",
+        doc="Pagamenti effettuati dal cliente",
+    )
+
     # ------------------------------------------------------------
     # Indici
     # ------------------------------------------------------------
     __table_args__ = (
         Index("ix_clients_name_surname", "name", "surname"),
         Index("ix_clients_tax_id", "tax_id"),
+        Index("ix_clients_sdi_code", "sdi_code"),
+        Index("ix_clients_foreign_vat_exemption", "is_foreign", "vat_exemption"),
     )
 
     # ------------------------------------------------------------

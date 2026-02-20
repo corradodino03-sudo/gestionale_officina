@@ -23,6 +23,8 @@ from app.models.mixins import TimestampMixin, UUIDMixin
 if TYPE_CHECKING:
     from app.models.client import Client
     from app.models.vehicle import Vehicle
+    from app.models.part import PartUsage
+    from app.models.invoice import Invoice
 
 
 # Gli stati sono definiti in app.schemas.work_order.WorkOrderStatus
@@ -158,6 +160,22 @@ class WorkOrder(Base, UUIDMixin, TimestampMixin):
         cascade="all, delete-orphan",
         lazy="noload",
         doc="Voci di lavoro (manodopera/interventi) associate all'ordine",
+    )
+
+    part_usages: Mapped[List["PartUsage"]] = relationship(
+        "PartUsage",
+        back_populates="work_order",
+        cascade="all, delete-orphan",
+        lazy="noload",
+        doc="Utilizzi ricambi associati all'ordine",
+    )
+
+    invoice: Mapped[Optional["Invoice"]] = relationship(
+        "Invoice",
+        back_populates="work_order",
+        uselist=False,  # relazione 1:1
+        lazy="selectin",
+        doc="Fattura associata all'ordine",
     )
 
     # ------------------------------------------------------------

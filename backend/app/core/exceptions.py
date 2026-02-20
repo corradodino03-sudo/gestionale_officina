@@ -17,7 +17,9 @@ __all__ = [
     "NotFoundError",
     "DuplicateError",
     "BusinessValidationError",
+    "ValidationError",       # alias di BusinessValidationError
     "ConflictError",
+    "AuthorizationError",
 ]
 
 
@@ -148,6 +150,10 @@ class BusinessValidationError(AppException):
         super().__init__(detail, error_code, extra)
 
 
+# Alias per compatibilità
+ValidationError = BusinessValidationError
+
+
 class ConflictError(AppException):
     """
     Eccezione sollevata per conflitti di stato.
@@ -171,6 +177,38 @@ class ConflictError(AppException):
         Args:
             detail: Messaggio di errore (default: "Conflitto di stato")
             error_code: Identificativo univoco (default: "CONFLICT_STATE")
+            extra: Dati aggiuntivi da passare al frontend (default: None)
+        """
+        super().__init__(detail, error_code, extra)
+
+
+class AuthorizationError(AppException):
+    """
+    Eccezione sollevata per accesso non autorizzato.
+    
+    Utilizzata quando un utente tenta di accedere a una risorsa
+    o eseguire un'operazione per cui non ha i permessi necessari.
+    
+    Esempi di utilizzo:
+        - "Non hai i permessi per eliminare questo ordine"
+        - "Solo gli amministratori possono accedere a questa risorsa"
+    """
+
+    status_code: int = 403
+    error_code: str = "FORBIDDEN"
+
+    def __init__(
+        self,
+        detail: str = "Accesso non autorizzato",
+        error_code: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Inizializza l'eccezione AuthorizationError.
+        
+        Args:
+            detail: Messaggio di errore (default: "Accesso non autorizzato")
+            error_code: Identificativo univoco (default: "FORBIDDEN")
             extra: Dati aggiuntivi da passare al frontend (default: None)
         """
         super().__init__(detail, error_code, extra)

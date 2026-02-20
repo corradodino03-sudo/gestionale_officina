@@ -26,7 +26,9 @@ from app.schemas.work_order import (
     WorkOrderStatusUpdate,
     WorkOrderUpdate,
 )
+from app.schemas.part import PartUsageCreate, PartUsageRead
 from app.services.work_order_service import WorkOrderService
+from app.services.part_service import part_service
 
 # Logger per questo modulo
 logger = logging.getLogger(__name__)
@@ -350,4 +352,131 @@ async def delete_work_order_item(
         ValidationError: Se l'ordine non permette la rimozione
     """
     await work_order_service.remove_item(db, work_order_id, item_id)
+    await db.commit()
+
+
+# -------------------------------------------------------------------
+# Endpoints per Utilizzo Ricambi in Ordini di Lavoro
+# -------------------------------------------------------------------
+
+@router.post(
+    "/{work_order_id}/parts",
+    name="part_utilizzato_aggiungi",
+    summary="Aggiungi ricambio all'ordine",
+    description="Aggiunge un ricambio utilizzato in un ordine di lavoro.",
+    response_model=PartUsageRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_part_to_work_order(
+    work_order_id: uuid.UUID = Path(..., description="UUID dell'ordine di lavoro"),
+    data: PartUsageCreate = ...,
+    db: AsyncSession = Depends(get_db),
+) -> PartUsageRead:
+    """
+    Aggiunge un ricambio a un ordine di lavoro.
+    
+    Questa operazione:
+    - Crea un utilizzo ricambio
+    - Scarica automaticamente il magazzino
+    - Registra il movimento di stock
+    
+    Args:
+        work_order_id: UUID dell'ordine di lavoro
+        data: Dati del ricambio da aggiungere
+        db: Sessione database
+        
+    Returns:
+        PartUsageRead: L'utilizzo creato
+        
+    Raises:
+        NotFoundError: Se l'ordine o il ricambio non esiste
+        BusinessValidationError: Se l'ordine non è in stato modificabile
+                                  o la giacenza è insufficiente
+    """
+    part_usage = await part_service.add_part_to_work_order(db, work_order_id, data)
+    await db.commit()
+    
+    return PartUsageRead(
+        id=part_usage.id,
+        part_id=part_usage.part_id,
+        work_order_id=part_usage.work_order_id,
+        quantity=part_usage.quantity,
+        unit_price=part_usage.unit_price,
+        created_at=part_usage.created_at,
+        updated_at=part_usage.updated_at,
+        part_code=part_usage.part.code if part_usage.part else None,
+        part_description=part_usage.part.description if part_usage.part else None,
+    )
+
+
+@router.get(
+    "/{work_order_id}/parts",
+    name="part_utilizzati_lista",
+    summary="Lista ricambi dell'ordine",
+    description="Recupera tutti i ricambi utilizzati in un ordine di lavoro.",
+    response_model=list[PartUsageRead],
+    status_code=status.HTTP_200_OK,
+)
+async def get_parts_for_work_order(
+    work_order_id: uuid.UUID = Path(..., description="UUID dell'ordine di lavoro"),
+    db: AsyncSession = Depends(get_db),
+) -> list[PartUsageRead]:
+    """
+    Recupera tutti i ricambi utilizzati in un ordine di lavoro.
+    
+    Args:
+        work_order_id: UUID dell'ordine di lavoro
+        db: Sessione database
+        
+    Returns:
+        Lista dei PartUsage con i dettagli del ricambio
+    """
+    part_usages = await part_service.get_parts_for_work_order(db, work_order_id)
+    
+    return [
+        PartUsageRead(
+            id=pu.id,
+            part_id=pu.part_id,
+            work_order_id=pu.work_order_id,
+            quantity=pu.quantity,
+            unit_price=pu.unit_price,
+            created_at=pu.created_at,
+            updated_at=pu.updated_at,
+            part_code=pu.part.code if pu.part else None,
+            part_description=pu.part.description if pu.part else None,
+        )
+        for pu in part_usages
+    ]
+
+
+@router.delete(
+    "/{work_order_id}/parts/{usage_id}",
+    name="part_utilizzato_rimuovi",
+    summary="Rimuovi ricambio dall'ordine",
+    description="Rimuove un ricambio da un ordine di lavoro e ripristina il magazzino.",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_part_from_work_order(
+    work_order_id: uuid.UUID = Path(..., description="UUID dell'ordine di lavoro"),
+    usage_id: uuid.UUID = Path(..., description="UUID dell'utilizzo ricambio"),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """
+    Rimuove un ricambio da un ordine di lavoro.
+    
+    Questa operazione:
+    - Rimuove l'utilizzo ricambio
+    - Ricarica automaticamente il magazzino
+    - Registra il movimento di stock
+    
+    Args:
+        work_order_id: UUID dell'ordine di lavoro
+        usage_id: UUID dell'utilizzo ricambio da rimuovere
+        db: Sessione database
+        
+    Raises:
+        NotFoundError: Se l'utilizzo non esiste
+        BusinessValidationError: Se l'ordine non è in stato modificabile
+    """
+    await part_service.remove_part_from_work_order(db, work_order_id, usage_id)
     await db.commit()

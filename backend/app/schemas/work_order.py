@@ -9,7 +9,7 @@ import datetime
 import uuid
 from decimal import Decimal
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from zoneinfo import ZoneInfo
 
 from pydantic import (
@@ -20,6 +20,11 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+# Import per type hinting (evita circular import)
+if TYPE_CHECKING:
+    from app.schemas.part import PartUsageRead
+    from app.schemas.invoice import InvoiceRead as InvoiceReadSchema
 
 
 # -------------------------------------------------------------------
@@ -264,7 +269,7 @@ class WorkOrderRead(WorkOrderBase):
     """
     Schema per la lettura di un ordine di lavoro.
     
-    Include lo stato, le voci di lavoro, i timestamp e i totali calcolati.
+    Include lo stato, le voci di lavoro, i ricambi utilizzati, i timestamp e i totali calcolati.
     """
     model_config = ConfigDict(from_attributes=True)
 
@@ -274,6 +279,11 @@ class WorkOrderRead(WorkOrderBase):
     created_at: datetime.datetime
     updated_at: datetime.datetime
     items: list[WorkOrderItemRead] = Field(default_factory=list)
+    part_usages: list["PartUsageRead"] = Field(default_factory=list)
+    invoice: Optional["InvoiceReadSchema"] = Field(
+        default=None,
+        description="Fattura associata all'ordine"
+    )
 
     @computed_field
     @property
@@ -297,9 +307,18 @@ class WorkOrderRead(WorkOrderBase):
 
     @computed_field
     @property
+    def total_parts(self) -> Decimal:
+        """Totale ricambi (somma line_total dei part_usages)."""
+        total = Decimal("0")
+        for usage in self.part_usages:
+            total += usage.line_total
+        return total
+
+    @computed_field
+    @property
     def total(self) -> Decimal:
-        """Totale complessivo (manodopera + interventi)."""
-        return self.total_labor + self.total_services
+        """Totale complessivo (manodopera + interventi + ricambi)."""
+        return self.total_labor + self.total_services + self.total_parts
 
 
 # -------------------------------------------------------------------

@@ -26,6 +26,46 @@ class MovementType(str, Enum):
     ADJUSTMENT = "adjustment"
 
 
+class UnitOfMeasure(str, Enum):
+    """Unità di misura consentite per i ricambi."""
+    PZ = "pz"
+    LT = "lt"
+    KG = "kg"
+    MT = "mt"
+    ML = "ml"
+    GR = "gr"
+
+
+# ------------------------------------------------------------
+# Schemas PartCategory
+# ------------------------------------------------------------
+
+class PartCategoryBase(BaseModel):
+    """Schema base per la categoria."""
+    name: str = Field(..., min_length=1, max_length=100, description="Nome categoria")
+    description: Optional[str] = Field(None, description="Descrizione")
+    parent_id: Optional[uuid.UUID] = Field(None, description="Categoria padre (opzionale)")
+    is_active: bool = Field(default=True, description="Categoria attiva")
+
+class PartCategoryCreate(PartCategoryBase):
+    pass
+
+class PartCategoryUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    parent_id: Optional[uuid.UUID] = None
+    is_active: Optional[bool] = None
+
+class PartCategoryRead(PartCategoryBase):
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: uuid.UUID
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    children: list["PartCategoryRead"] = Field(default_factory=list)
+
+PartCategoryRead.model_rebuild()
+
 # ------------------------------------------------------------
 # Schemas Part
 # ------------------------------------------------------------
@@ -47,6 +87,8 @@ class PartBase(BaseModel):
     min_stock_level: int = Field(default=0, ge=0, description="Livello minimo giacenza per alert")
     location: Optional[str] = Field(None, max_length=50, description="Posizione fisica in magazzino")
     is_active: bool = Field(default=True, description="Indica se il ricambio è attivo")
+    category_id: Optional[uuid.UUID] = Field(None, description="UUID della categoria")
+    unit_of_measure: UnitOfMeasure = Field(default=UnitOfMeasure.PZ, description="Unità di misura")
 
     @field_validator("code", mode="before")
     @classmethod
@@ -105,6 +147,8 @@ class PartUpdate(BaseModel):
     min_stock_level: Optional[int] = Field(None, ge=0, description="Livello minimo giacenza")
     location: Optional[str] = Field(None, max_length=50, description="Posizione in magazzino")
     is_active: Optional[bool] = Field(None, description="Attivo/disponibile")
+    category_id: Optional[uuid.UUID] = Field(None, description="UUID della categoria")
+    unit_of_measure: Optional[UnitOfMeasure] = Field(None, description="Unità di misura")
 
     @field_validator("code", mode="before")
     @classmethod
@@ -135,6 +179,7 @@ class PartRead(PartBase):
     stock_quantity: int = Field(..., description="Giacenza attuale")
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    category: Optional[PartCategoryRead] = Field(None, description="Categoria del ricambio")
 
     @computed_field
     @property
@@ -195,6 +240,7 @@ class PartUsageRead(PartUsageBase):
     updated_at: datetime.datetime
     part_code: Optional[str] = Field(None, description="Codice ricambio (denormalizzato)")
     part_description: Optional[str] = Field(None, description="Descrizione ricambio (denormalizzato)")
+    unit_of_measure: UnitOfMeasure = Field(default=UnitOfMeasure.PZ, description="Unità di misura")
 
     @computed_field
     @property

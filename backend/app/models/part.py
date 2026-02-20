@@ -23,6 +23,32 @@ if TYPE_CHECKING:
     from app.models.work_order import WorkOrder
 
 
+class PartCategory(Base, UUIDMixin, TimestampMixin):
+    """
+    Modello per la classificazione in categorie dei ricambi.
+    Supporta subcategorie annidate tramite self-referencing.
+    """
+    __tablename__ = "part_categories"
+
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("part_categories.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    parent: Mapped[Optional["PartCategory"]] = relationship(
+        "PartCategory", remote_side="PartCategory.id", back_populates="children"
+    )
+    children: Mapped[list["PartCategory"]] = relationship(
+        "PartCategory", back_populates="parent", lazy="selectin"
+    )
+    parts: Mapped[list["Part"]] = relationship("Part", back_populates="category", lazy="noload")
+
+    def __repr__(self) -> str:
+        return f"PartCategory(name={self.name!r}, parent_id={self.parent_id})"
+
+
 class Part(Base, UUIDMixin, TimestampMixin):
     """
     Modello per l'anagrafica ricambi.
@@ -53,6 +79,17 @@ class Part(Base, UUIDMixin, TimestampMixin):
     """
 
     __tablename__ = "parts"
+
+    # ------------------------------------------------------------
+    # Colonne Relazione Categoria
+    # ------------------------------------------------------------
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("part_categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        doc="UUID della categoria",
+    )
 
     # ------------------------------------------------------------
     # Colonne
@@ -134,9 +171,23 @@ class Part(Base, UUIDMixin, TimestampMixin):
         doc="Indica se il ricambio è attivo/disponibile",
     )
 
+    unit_of_measure: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="pz",
+        doc="Unità di misura (pz, lt, kg, mt, ml, gr)",
+    )
+
     # ------------------------------------------------------------
     # Relationships
     # ------------------------------------------------------------
+    category: Mapped[Optional["PartCategory"]] = relationship(
+        "PartCategory",
+        back_populates="parts",
+        lazy="joined",
+        doc="Categoria del ricambio",
+    )
+
     usages: Mapped[List["PartUsage"]] = relationship(
         "PartUsage",
         back_populates="part",
@@ -229,6 +280,13 @@ class PartUsage(Base, UUIDMixin, TimestampMixin):
         Numeric(10, 2),
         nullable=False,
         doc="Prezzo unitario al momento dell'utilizzo",
+    )
+
+    unit_of_measure: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="pz",
+        doc="Unità di misura al momento dell'utilizzo",
     )
 
     # ------------------------------------------------------------

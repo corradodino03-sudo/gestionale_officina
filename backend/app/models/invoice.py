@@ -60,6 +60,10 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
         split_payment: Flag split payment (PA)
         notes: Note interne
         customer_notes: Note per il cliente (stampate in fattura)
+        stamp_duty_applied: Flag marca da bollo
+        stamp_duty_amount: Importo marca da bollo
+        payment_iban: IBAN per bonifico
+        payment_reference: Riferimento pagamento
         created_at: Data/ora creazione record
         updated_at: Data/ora ultimo aggiornamento
         
@@ -87,8 +91,21 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
         Uuid,
         ForeignKey("clients.id", ondelete="RESTRICT"),
         nullable=False,
-        doc="UUID del cliente (denormalizzato per velocità query)",
+        doc="UUID del cliente proprietario del veicolo (denormalizzato per velocità query)",
     )
+
+    # FEAT 3: Fattura a terzi
+    bill_to_client_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("clients.id", ondelete="SET NULL"),
+        nullable=True,
+        doc="UUID del cliente a cui è intestata la fattura (se diverso dal proprietario)",
+    )
+    bill_to_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    bill_to_tax_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    bill_to_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claim_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
 
     # ------------------------------------------------------------
     # Colonne Identificazione
@@ -137,7 +154,39 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
     total: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
-        doc="Totale fattura (subtotal + vat_amount)",
+        doc="Totale fattura (subtotal + vat_amount + stamp_duty_amount)",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne Marca da Bollo (FEAT 3)
+    # ------------------------------------------------------------
+    stamp_duty_applied: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Flag marca da bollo applicata",
+    )
+
+    stamp_duty_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        doc="Importo marca da bollo",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne Pagamento (FEAT 2)
+    # ------------------------------------------------------------
+    payment_iban: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        doc="IBAN per pagamenti con bonifico",
+    )
+
+    payment_reference: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        doc="Riferimento pagamento (es. numero fattura da riportare in causale)",
     )
 
     # ------------------------------------------------------------
@@ -212,6 +261,15 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
         doc="Allocazioni di pagamenti su questa fattura",
     )
 
+    # Note di credito
+    credit_notes: Mapped[List["CreditNote"]] = relationship(
+        "CreditNote",
+        back_populates="invoice",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        doc="Note di credito che stornano questa fattura",
+    )
+
     # ------------------------------------------------------------
     # Properties Calcolate
     # ------------------------------------------------------------
@@ -229,11 +287,16 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
     def status(self) -> str:
         """
         Stato calcolato in base ai pagamenti:
+        - 'credited': stornata da nota di credito
         - 'paid': totalmente pagata
         - 'overdue': scaduta e non pagata
         - 'partial': parzialmente pagata
         - 'unpaid': non pagata
         """
+        # Controlla note di credito
+        if getattr(self, "credit_notes", None) and len(self.credit_notes) > 0:
+            return "credited"
+
         if self.paid_amount >= self.total:
             return "paid"
         elif date.today() > self.due_date and self.remaining_amount > 0:
@@ -349,10 +412,10 @@ class InvoiceLine(Base, UUIDMixin, TimestampMixin):
     # ------------------------------------------------------------
     # Colonne Sconto (FEAT 3)
     # ------------------------------------------------------------
-    discount_percent: Mapped[float] = mapped_column(
-        Float,
+    discount_percent: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
         nullable=False,
-        default=0.0,
+        default=Decimal("0.00"),
         doc="Percentuale di sconto applicata alla riga (0-100)",
     )
 
@@ -670,3 +733,90 @@ class Payment(Base, UUIDMixin, TimestampMixin):
             Stringa che identifica il pagamento
         """
         return f"<Payment(id={self.id}, amount={self.amount}, method={self.payment_method})>"
+
+
+class CreditNote(Base, UUIDMixin, TimestampMixin):
+    """
+    Modello per le note di credito.
+    Rappresenta uno storno parziale o totale di una fattura.
+    """
+    __tablename__ = "credit_notes"
+
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("invoices.id", ondelete="RESTRICT"), nullable=False
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("clients.id", ondelete="RESTRICT"), nullable=False
+    )
+
+    credit_note_number: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    credit_note_date: Mapped[date] = mapped_column(Date, nullable=False)
+    
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    vat_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    total: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    
+    stamp_duty_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False, default=Decimal("0.00")
+    )
+
+    # Relazioni
+    invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="credit_notes")
+    client: Mapped["Client"] = relationship("Client")
+    lines: Mapped[List["CreditNoteLine"]] = relationship("CreditNoteLine", back_populates="credit_note", cascade="all, delete-orphan")
+
+
+class CreditNoteLine(Base, UUIDMixin, TimestampMixin):
+    """Righe di una nota di credito."""
+    __tablename__ = "credit_note_lines"
+
+    credit_note_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("credit_notes.id", ondelete="CASCADE"), nullable=False
+    )
+
+    line_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    vat_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    discount_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("0.00"))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=Decimal("0.00"))
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Relazioni
+    credit_note: Mapped["CreditNote"] = relationship("CreditNote", back_populates="lines")
+
+
+class Deposit(Base, UUIDMixin, TimestampMixin):
+    """
+    Modello per le caparre/acconti versati dal cliente.
+    """
+    __tablename__ = "deposits"
+
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("clients.id", ondelete="RESTRICT"), nullable=False
+    )
+    work_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("work_orders.id", ondelete="SET NULL"), nullable=True
+    )
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("invoices.id", ondelete="RESTRICT"), nullable=True
+    )
+
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(20), nullable=False)
+    deposit_date: Mapped[date] = mapped_column(Date, nullable=False)
+    
+    reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", doc="pending, applied, refunded"
+    )
+
+    # Relazioni
+    client: Mapped["Client"] = relationship("Client")
+    work_order: Mapped["WorkOrder"] = relationship("WorkOrder")
+    invoice: Mapped["Invoice"] = relationship("Invoice")

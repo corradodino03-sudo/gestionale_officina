@@ -79,6 +79,12 @@ class Vehicle(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         nullable=False,
         doc="Modello del veicolo",
     )
+    
+    color: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        doc="Colore del veicolo",
+    )
 
     # ------------------------------------------------------------
     # Colonne Dati Tecnici Opzionali

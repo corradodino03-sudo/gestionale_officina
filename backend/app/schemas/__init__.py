@@ -31,6 +31,10 @@ from app.schemas.work_order import (
 )
 from app.schemas.part import (
     MovementType,
+    UnitOfMeasure,
+    PartCategoryCreate,
+    PartCategoryRead,
+    PartCategoryUpdate,
     LowStockAlert,
     LowStockAlertList,
     PartCreate,
@@ -61,12 +65,29 @@ from app.schemas.invoice import (
     InvoiceList,
     RevenueReport,
     CreateInvoiceFromWorkOrder,
+    CreditNoteRead,
+    CreditNoteLineRead,
+    PartialCreditNoteRequest,
+    DepositStatus,
+    DepositCreate,
+    DepositRead,
+    InvoiceCreationResponse,
 )
 from app.schemas.intent_declaration import (
     IntentDeclarationCreate,
     IntentDeclarationRead,
     IntentDeclarationUpdate,
     IntentDeclarationList,
+)
+from app.schemas.technician import (
+    TechnicianCreate,
+    TechnicianRead,
+    TechnicianUpdate,
+)
+from app.schemas.cash_register import (
+    CashRegisterSummary,
+    CashRegisterCloseRead,
+    CashRegisterCloseCreate,
 )
 
 # NOTA: VehicleRead.model_rebuild() deve essere chiamato dopo l'import di ClientRead
@@ -76,6 +97,10 @@ VehicleRead.model_rebuild()
 # Rebuild per forward references circolari tra WorkOrder e Part
 WorkOrderRead.model_rebuild()
 PartUsageRead.model_rebuild()
+
+# Rebuild per Technician in WorkOrder
+WorkOrderRead.model_rebuild()
+WorkOrderItemRead.model_rebuild()
 
 # Rebuild per Invoice
 InvoiceReadSchema.model_rebuild()
@@ -105,6 +130,10 @@ __all__ = [
     "WorkOrderUpdate",
     # Part schemas
     "MovementType",
+    "UnitOfMeasure",
+    "PartCategoryCreate",
+    "PartCategoryRead",
+    "PartCategoryUpdate",
     "LowStockAlert",
     "LowStockAlertList",
     "PartCreate",
@@ -134,9 +163,24 @@ __all__ = [
     "InvoiceList",
     "RevenueReport",
     "CreateInvoiceFromWorkOrder",
+    "CreditNoteRead",
+    "CreditNoteLineRead",
+    "PartialCreditNoteRequest",
+    "DepositStatus",
+    "DepositCreate",
+    "DepositRead",
+    "InvoiceCreationResponse",
     # IntentDeclaration schemas
     "IntentDeclarationCreate",
     "IntentDeclarationRead",
     "IntentDeclarationUpdate",
     "IntentDeclarationList",
+    # Technician schemas
+    "TechnicianCreate",
+    "TechnicianRead",
+    "TechnicianUpdate",
+    # Cash Register schemas
+    "CashRegisterSummary",
+    "CashRegisterCloseRead",
+    "CashRegisterCloseCreate",
 ]

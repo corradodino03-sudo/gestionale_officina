@@ -127,6 +127,7 @@ async def get_parts(
     search: Optional[str] = Query(None, description="Termine di ricerca"),
     is_active: Optional[bool] = Query(None, description="Filtro per stato attivo"),
     below_minimum: bool = Query(False, description="Solo ricambi sotto il minimo"),
+    category_id: Optional[uuid.UUID] = Query(None, description="Filtro per categoria"),
     db: AsyncSession = Depends(get_db),
 ) -> PartList:
     """
@@ -139,6 +140,7 @@ async def get_parts(
         search=search,
         is_active=is_active,
         below_minimum=below_minimum,
+        category_id=category_id,
     )
     
     return PartList(

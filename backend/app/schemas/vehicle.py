@@ -211,6 +211,12 @@ class VehicleBase(VehicleValidatorsMixin):
         max_length=100,
         description="Modello del veicolo",
     )
+    
+    color: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Colore",
+    )
 
     year: Optional[int] = Field(
         None,
@@ -291,6 +297,12 @@ class VehicleUpdate(VehicleValidatorsMixin):
         min_length=1,
         max_length=100,
         description="Modello del veicolo",
+    )
+    
+    color: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Colore",
     )
 
     year: Optional[int] = Field(

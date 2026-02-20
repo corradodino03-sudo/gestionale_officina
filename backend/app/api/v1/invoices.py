@@ -25,19 +25,32 @@ from app.schemas.invoice import (
     PaymentCreate,
     PaymentRead,
     RevenueReport,
+    CreditNoteRead,
+    PartialCreditNoteRequest,
+    InvoiceCreationResponse,
+    PendingDepositSummary,
+    DepositStatus,
 )
 from app.services.invoice_service import InvoiceService
+from app.services.credit_note_service import CreditNoteService
 
 # Logger per questo modulo
 logger = logging.getLogger(__name__)
 
 # Istanza del service
 invoice_service = InvoiceService()
+credit_note_service = CreditNoteService()
 
 # Router con prefix e tag
 router = APIRouter(
     prefix="/invoices",
     tags=["Fatturazione"],
+)
+
+# Router separato per le note di credito lista
+credit_notes_router = APIRouter(
+    prefix="/credit-notes",
+    tags=["Note di Credito"],
 )
 
 
@@ -164,27 +177,19 @@ async def get_invoice_by_number(
     name="crea_fattura_da_ordine",
     summary="Crea fattura da ordine di lavoro",
     description="Genera una fattura da un ordine di lavoro completato.",
-    response_model=InvoiceRead,
+    response_model=InvoiceCreationResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_invoice_from_work_order(
     work_order_id: uuid.UUID = Path(..., description="UUID dell'ordine di lavoro"),
     data: CreateInvoiceFromWorkOrder = ...,
     db: AsyncSession = Depends(get_db),
-) -> InvoiceRead:
+) -> InvoiceCreationResponse:
     """
     Genera una fattura da un ordine di lavoro COMPLETATO.
     
     L'ordine di lavoro deve essere nello stato 'completed'.
     Se l'ordine ha già una fattura associata, restituisce errore.
-    
-    Dati obbligatori:
-    - work_order_id: UUID dell'ordine di lavoro
-    
-    Dati opzionali:
-    - invoice_date: data emissione fattura (default: oggi)
-    - due_date: data scadenza (default: invoice_date + 30 giorni)
-    - customer_notes: note per il cliente
     """
     return await invoice_service.create_from_work_order(
         db=db,
@@ -245,6 +250,82 @@ async def delete_invoice(
     """
     await invoice_service.delete(db=db, invoice_id=invoice_id)
 
+
+# -------------------------------------------------------------------
+# Endpoints per Note di Credito
+# -------------------------------------------------------------------
+
+@router.post(
+    "/{invoice_id}/credit-note",
+    name="crea_nota_di_credito",
+    summary="Crea nota di credito (storno totale)",
+    description="Crea una nota di credito a storno totale di una fattura.",
+    response_model=CreditNoteRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Note di Credito"],
+)
+async def create_credit_note(
+    invoice_id: uuid.UUID = Path(..., description="UUID della fattura"),
+    reason: str = Query(..., min_length=1, description="Motivo dello storno"),
+    db: AsyncSession = Depends(get_db),
+) -> CreditNoteRead:
+    return await credit_note_service.create_from_invoice(db=db, invoice_id=invoice_id, reason=reason)
+
+@router.post(
+    "/{invoice_id}/credit-note/partial",
+    name="crea_nota_di_credito_parziale",
+    summary="Crea nota di credito (storno parziale)",
+    description="Crea una nota di credito stornando solo parzialmente una fattura.",
+    response_model=CreditNoteRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Note di Credito"],
+)
+async def create_partial_credit_note(
+    request: PartialCreditNoteRequest,
+    invoice_id: uuid.UUID = Path(..., description="UUID della fattura"),
+    db: AsyncSession = Depends(get_db),
+) -> CreditNoteRead:
+    return await credit_note_service.create_partial(db=db, invoice_id=invoice_id, request=request)
+
+@router.get(
+    "/{invoice_id}/credit-note",
+    name="leggi_nota_di_credito_fattura",
+    summary="Leggi nota di credito da fattura",
+    description="Restituisce le note di credito relative ad una fattura.",
+    response_model=list[CreditNoteRead],
+    tags=["Note di Credito"],
+)
+async def get_credit_notes_by_invoice(
+    invoice_id: uuid.UUID = Path(..., description="UUID della fattura"),
+    db: AsyncSession = Depends(get_db),
+) -> list[CreditNoteRead]:
+    return await credit_note_service.get_by_invoice(db=db, invoice_id=invoice_id)
+
+
+@credit_notes_router.get(
+    "/",
+    name="lista_note_di_credito",
+    summary="Lista tutte le note di credito",
+    description="Restituisce tutte le note di credito emesse.",
+    response_model=list[CreditNoteRead],
+)
+async def list_credit_notes(
+    db: AsyncSession = Depends(get_db),
+) -> list[CreditNoteRead]:
+    return await credit_note_service.get_all(db=db)
+
+@credit_notes_router.get(
+    "/{credit_note_id}",
+    name="dettaglio_nota_di_credito",
+    summary="Dettaglio nota di credito",
+    description="Recupera dettaglio della singola nota di credito.",
+    response_model=CreditNoteRead,
+)
+async def get_credit_note(
+    credit_note_id: uuid.UUID = Path(..., description="UUID della nota di credito"),
+    db: AsyncSession = Depends(get_db),
+) -> CreditNoteRead:
+    return await credit_note_service.get_by_id(db=db, credit_note_id=credit_note_id)
 
 # -------------------------------------------------------------------
 # Endpoints per Pagamenti (non più nested sotto fatture)

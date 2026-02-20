@@ -42,6 +42,7 @@ class PaymentMethod(str, Enum):
 
 class InvoiceStatus(str, Enum):
     """Enum per rappresentare lo stato calcolato della fattura."""
+    CREDITED = "credited"
     PAID = "paid"
     PARTIAL = "partial"
     UNPAID = "unpaid"
@@ -53,6 +54,13 @@ class InvoiceLineType(str, Enum):
     LABOR = "labor"
     SERVICE = "service"
     PART = "part"
+
+
+class DepositStatus(str, Enum):
+    """Stati possibili di una caparra/acconto."""
+    PENDING = "pending"
+    APPLIED = "applied"
+    REFUNDED = "refunded"
 
 
 # -------------------------------------------------------------------
@@ -462,6 +470,35 @@ class InvoiceRead(InvoiceBase):
         description="Flag split payment (PA)",
         serialization_alias="splitPayment"
     )
+    # FEAT 3: Marca da bollo
+    stamp_duty_applied: bool = Field(
+        ...,
+        description="Flag marca da bollo applicata",
+        serialization_alias="stampDutyApplied"
+    )
+    stamp_duty_amount: Decimal = Field(
+        ...,
+        description="Importo marca da bollo",
+        serialization_alias="stampDutyAmount"
+    )
+    # FEAT 2: Dati pagamento
+    payment_iban: Optional[str] = Field(
+        None,
+        description="IBAN per pagamenti con bonifico",
+        serialization_alias="paymentIban"
+    )
+    payment_reference: Optional[str] = Field(
+        None,
+        description="Riferimento pagamento",
+        serialization_alias="paymentReference"
+    )
+    # FEAT 3: Fattura a terzi
+    bill_to_client_id: Optional[uuid.UUID] = Field(None, serialization_alias="billToClientId")
+    bill_to_name: Optional[str] = Field(None, serialization_alias="billToName")
+    bill_to_tax_id: Optional[str] = Field(None, serialization_alias="billToTaxId")
+    bill_to_address: Optional[str] = Field(None, serialization_alias="billToAddress")
+    claim_number: Optional[str] = Field(None, serialization_alias="claimNumber")
+    
     # Timestamps
     created_at: date = Field(..., description="Data/ora creazione")
     updated_at: date = Field(..., description="Data/ora ultimo aggiornamento")
@@ -618,5 +655,108 @@ class CreateInvoiceFromWorkOrder(BaseModel):
         description="Aliquota IVA applicata (default 22% standard Italia)",
         serialization_alias="vatRate"
     )
+    bill_to_client_id: Optional[uuid.UUID] = Field(None, serialization_alias="billToClientId")
+    claim_number: Optional[str] = Field(None, serialization_alias="claimNumber")
     
     model_config = ConfigDict(from_attributes=True)
+
+
+# -------------------------------------------------------------------
+# Schemas per CreditNote (FEAT 4)
+# -------------------------------------------------------------------
+
+class CreditNoteLineCreate(BaseModel):
+    """Schema per creare una riga di nota di credito (storno parziale)."""
+    invoice_line_id: uuid.UUID = Field(..., description="UUID della riga fattura da stornare")
+    quantity: Decimal = Field(..., gt=0, description="Quantità da stornare")
+
+class PartialCreditNoteRequest(BaseModel):
+    """Richiesta di storno parziale per nota di credito."""
+    reason: str = Field(..., min_length=1, max_length=255, description="Motivo dello storno")
+    lines: list[CreditNoteLineCreate] = Field(..., min_length=1, description="Righe da stornare")
+
+class CreditNoteLineRead(BaseModel):
+    """Schema per la lettura di una riga di nota di credito."""
+    id: uuid.UUID
+    credit_note_id: uuid.UUID
+    line_type: InvoiceLineType
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    vat_rate: Decimal
+    discount_percent: Decimal
+    discount_amount: Decimal
+    line_number: int
+
+    @computed_field
+    @property
+    def subtotal(self) -> Decimal:
+        gross = self.quantity * self.unit_price
+        return gross - self.discount_amount
+
+    @computed_field
+    @property
+    def vat_amount(self) -> Decimal:
+        return (self.subtotal * self.vat_rate) / Decimal("100")
+
+    @computed_field
+    @property
+    def total(self) -> Decimal:
+        return self.subtotal + self.vat_amount
+
+    model_config = ConfigDict(from_attributes=True)
+
+class CreditNoteRead(BaseModel):
+    """Schema per la lettura di una nota di credito."""
+    id: uuid.UUID
+    invoice_id: uuid.UUID
+    client_id: uuid.UUID
+    credit_note_number: str = Field(..., serialization_alias="creditNoteNumber")
+    credit_note_date: date = Field(..., serialization_alias="creditNoteDate")
+    reason: str
+    subtotal: Decimal
+    vat_amount: Decimal = Field(..., serialization_alias="vatAmount")
+    total: Decimal
+    stamp_duty_amount: Decimal = Field(..., serialization_alias="stampDutyAmount")
+    created_at: date
+    updated_at: date
+
+    lines: list[CreditNoteLineRead]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -------------------------------------------------------------------
+# Schemas per Caparre/Acconti (Deposit)
+# -------------------------------------------------------------------
+
+class DepositBase(BaseModel):
+    client_id: uuid.UUID = Field(..., serialization_alias="clientId")
+    work_order_id: Optional[uuid.UUID] = Field(None, serialization_alias="workOrderId")
+    amount: Decimal = Field(..., gt=0)
+    payment_method: PaymentMethod = Field(..., serialization_alias="paymentMethod")
+    deposit_date: date = Field(..., serialization_alias="depositDate")
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+
+class DepositCreate(DepositBase):
+    pass
+
+class DepositRead(DepositBase):
+    id: uuid.UUID
+    status: DepositStatus
+    invoice_id: Optional[uuid.UUID] = Field(None, serialization_alias="invoiceId")
+    created_at: date
+    updated_at: date
+
+    model_config = ConfigDict(from_attributes=True)
+
+class PendingDepositSummary(BaseModel):
+    deposits: list[DepositRead]
+    total_amount: Decimal = Field(..., serialization_alias="totalAmount")
+
+class InvoiceCreationResponse(BaseModel):
+    invoice: InvoiceReadSchema
+    pending_deposits: Optional[PendingDepositSummary] = Field(None, serialization_alias="pendingDeposits")
+
+

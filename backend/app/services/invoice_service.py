@@ -32,7 +32,11 @@ from app.schemas.invoice import (
     PaymentAllocationCreate,
     PaymentCreate,
     RevenueReport,
+    InvoiceCreationResponse,
+    PendingDepositSummary,
+    DepositStatus,
 )
+from app.core.config import settings
 
 # Logger per questo modulo
 logger = logging.getLogger(__name__)
@@ -58,7 +62,7 @@ class InvoiceService:
         db: AsyncSession,
         work_order_id: uuid.UUID,
         data: CreateInvoiceFromWorkOrder,
-    ) -> Invoice:
+    ) -> InvoiceCreationResponse:
         """
         Genera una fattura da un ordine di lavoro COMPLETATO.
         
@@ -93,7 +97,7 @@ class InvoiceService:
             data: Dati per la creazione della fattura
             
         Returns:
-            Invoice: La fattura creata
+            InvoiceCreationResponse: La fattura creata e le caparre in sospeso
             
         Raises:
             NotFoundError: work_order non esiste
@@ -136,45 +140,71 @@ class InvoiceService:
         client = work_order.client
         if not client:
             raise BusinessValidationError("Il cliente associato all'ordine non è stato trovato")
+            
+        # FEAT 3: Fattura a terzi
+        billing_client = client
+        bill_to_name = None
+        bill_to_tax_id = None
+        bill_to_address = None
+        
+        if getattr(data, 'bill_to_client_id', None):
+            stmt_billing = select(Client).where(Client.id == data.bill_to_client_id)
+            res_billing = await db.execute(stmt_billing)
+            billing_client_res = res_billing.scalar_one_or_none()
+            if not billing_client_res:
+                raise NotFoundError("Cliente terzo per fatturazione non trovato")
+                
+            billing_client = billing_client_res
+            
+            # Popola i dati denormalizzati
+            bill_to_name = f"{billing_client.first_name} {billing_client.last_name}".strip()
+            if billing_client.company_name:
+                bill_to_name = billing_client.company_name
+                
+            bill_to_tax_id = billing_client.vat_number or billing_client.tax_code
+            
+            bill_to_address = billing_client.effective_billing_address if hasattr(billing_client, 'effective_billing_address') else (
+                f"{billing_client.address}, {billing_client.city} ({billing_client.province}) {billing_client.zip_code}"
+            )
         
         # Step 5: Genera numero fattura
         invoice_date = data.invoice_date or date.today()
         invoice_number = await self._generate_invoice_number(db, invoice_date)
         
         # FEAT 1: Determina l'aliquota IVA da usare
-        # Se specificata nella richiesta, usa quella; altrimenti usa default del cliente
+        # Se specificata nella richiesta, usa quella; altrimenti usa default del cliente di fatturazione
         effective_vat_rate = data.vat_rate
         if effective_vat_rate is None:
-            # Usa il default del cliente se disponibile, altrimenti 22%
-            if client.default_vat_rate is not None:
-                effective_vat_rate = Decimal(str(client.default_vat_rate))
+            if getattr(billing_client, 'default_vat_rate', None) is not None:
+                effective_vat_rate = Decimal(str(billing_client.default_vat_rate))
             else:
                 effective_vat_rate = Decimal("22.00")
         
         # FEAT 4: Determina il regime IVA in base a vat_regime e vat_exemption
         # La logica ha precedenza su default_vat_rate quando il regime lo impone
         is_vat_exempt = False
-        vat_exemption_code = client.vat_exemption_code
+        vat_exemption_code = getattr(billing_client, 'vat_exemption_code', None)
         vat_notes = None
         
-        # Controlla il regime fiscale del cliente
-        if client.vat_regime == "RF19":  # Forfettario
+        # Controlla il regime fiscale del cliente di fatturazione
+        if getattr(billing_client, 'vat_regime', None) == "RF19":  # Forfettario
             is_vat_exempt = True
             effective_vat_rate = Decimal("0")
             vat_exemption_code = "N3.5"  # Non imponibili - dichiarazioni intento
             vat_notes = "Operazione effettuata ai sensi dell'art. 1, commi 54-89, L. 190/2014 - Regime Forfettario"
-        elif client.vat_regime == "RF02":  # Minimi
+        elif getattr(billing_client, 'vat_regime', None) == "RF02":  # Minimi
             is_vat_exempt = True
             effective_vat_rate = Decimal("0")
             vat_exemption_code = "N3.5"
             vat_notes = "Operazione effettuata ai sensi dell'art. 27, commi 1 e 2, D.L. 98/2011 - Regime dei Minimi"
-        elif client.vat_exemption:  # Esente IVA generico
+        elif getattr(billing_client, 'vat_exemption', False):  # Esente IVA generico
             is_vat_exempt = True
             effective_vat_rate = Decimal("0")
             # vat_exemption_code è già valorizzato dal cliente
         
         # Step 6: Calcola subtotal da work_order items e part_usages
         subtotal = Decimal("0")
+        exempt_subtotal = Decimal("0")
         
         line_number = 1
         invoice_lines = []
@@ -182,8 +212,8 @@ class InvoiceService:
         
         # FEAT 3: Determina lo sconto predefinito del cliente
         default_discount_percent = (
-            Decimal(str(client.default_discount_percent))
-            if client.default_discount_percent is not None
+            Decimal(str(billing_client.default_discount_percent))
+            if getattr(billing_client, 'default_discount_percent', None) is not None
             else Decimal("0")
         )
         
@@ -202,6 +232,9 @@ class InvoiceService:
             item_vat_rate = effective_vat_rate
             item_vat = ((item_subtotal - discount_amount) * item_vat_rate) / Decimal("100")
             total_vat += item_vat
+            
+            if item_vat_rate == Decimal("0"):
+                exempt_subtotal += (item_subtotal - discount_amount)
             
             invoice_line = InvoiceLine(
                 line_type=item.item_type,
@@ -240,6 +273,9 @@ class InvoiceService:
             part_vat = ((part_subtotal - discount_amount) * part_vat_rate) / Decimal("100")
             total_vat += part_vat
             
+            if part_vat_rate == Decimal("0"):
+                exempt_subtotal += (part_subtotal - discount_amount)
+            
             invoice_line = InvoiceLine(
                 line_type="part",
                 description=description,
@@ -266,25 +302,26 @@ class InvoiceService:
             due_date = data.due_date
         else:
             # Usa i giorni predefiniti del cliente (default 30)
-            payment_terms = getattr(client, 'payment_terms_days', 30) or 30
+            payment_terms = getattr(billing_client, 'payment_terms_days', 30) or 30
             due_date = invoice_date + timedelta(days=payment_terms)
         
-        # Calcola IVA
+        # Calcola IVA preliminare
         if is_vat_exempt:
             vat_amount = Decimal("0")
+            exempt_subtotal = subtotal
         else:
             vat_amount = total_vat.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         
         total = subtotal + vat_amount
-        # Arrotonda total a 2 decimali
+        # Arrotonda total preliminare a 2 decimali
         total = total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         
         # FEAT 5: Prepara indirizzo fatturazione effettivo
-        billing_address = client.effective_billing_address if hasattr(client, 'effective_billing_address') else {
-            "address": client.address,
-            "city": client.city,
-            "zip_code": client.zip_code,
-            "province": client.province,
+        billing_address = getattr(billing_client, 'effective_billing_address', None) or {
+            "address": getattr(billing_client, 'address', ''),
+            "city": getattr(billing_client, 'city', ''),
+            "zip_code": getattr(billing_client, 'zip_code', ''),
+            "province": getattr(billing_client, 'province', ''),
         }
         
         # FEAT 6: Gestione dichiarazioni di intento
@@ -295,7 +332,7 @@ class InvoiceService:
             intent_stmt = (
                 select(IntentDeclaration)
                 .where(
-                    IntentDeclaration.client_id == client.id,
+                    IntentDeclaration.client_id == billing_client.id,
                     IntentDeclaration.is_active == True,
                     IntentDeclaration.expiry_date >= invoice_date,
                 )
@@ -312,10 +349,17 @@ class InvoiceService:
                 vat_exemption_code = "N3.5"
                 vat_notes = "Operazione effettuata ai sensi dell'art. 1, c. 100, L. 244/2007 - Dichiarazione di intento"
                 
-                # Ricalcola il total senza IVA
+                # Ricalcola: tutto diventa esente
+                exempt_subtotal = subtotal
+                
+                # Ricalcola il total ritirando l'IVA
                 total = subtotal
                 
-                # Aggiorna used_amount
+                # Forza vat_rate a 0 su tutte le righe
+                for line in invoice_lines:
+                    line.vat_rate = Decimal("0")
+                
+                # Aggiorna used_amount calcolando il totale pre-bollo
                 active_intent.used_amount = (active_intent.used_amount + total).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
                 )
@@ -327,6 +371,15 @@ class InvoiceService:
                     f"Plafond dichiarato: {active_intent.amount_limit}, "
                     f"già utilizzato: {active_intent.used_amount}"
                 )
+        
+        # FEAT 3: Marca da bollo automatica (Fix per casi misti e dichiarazioni intento)
+        stamp_duty_applied = False
+        stamp_duty_amount = Decimal("0.00")
+        
+        if exempt_subtotal > settings.stamp_duty_threshold:
+            stamp_duty_applied = True
+            stamp_duty_amount = settings.stamp_duty_amount
+            total += stamp_duty_amount
         
         # FEAT 7: Controllo fido commerciale
         credit_limit_warning = None
@@ -379,10 +432,22 @@ class InvoiceService:
         if credit_limit_warning:
             notes = f"{notes}\n{credit_limit_warning}".strip()
         
+        # FEAT 2: Dati bancari
+        payment_iban = None
+        if getattr(billing_client, "payment_method_default", None) == "bank_transfer":
+            payment_iban = settings.invoice_iban
+            
+        payment_reference = invoice_number
+
         # Step 14-15: Crea Invoice
         invoice = Invoice(
             work_order_id=work_order_id,
             client_id=client.id,
+            bill_to_client_id=data.bill_to_client_id,
+            bill_to_name=bill_to_name,
+            bill_to_tax_id=bill_to_tax_id,
+            bill_to_address=bill_to_address if isinstance(bill_to_address, str) else str(bill_to_address),
+            claim_number=getattr(data, "claim_number", None),
             invoice_number=invoice_number,
             invoice_date=invoice_date,
             due_date=due_date,
@@ -392,9 +457,13 @@ class InvoiceService:
             total=total,
             vat_exemption=is_vat_exempt,
             vat_exemption_code=vat_exemption_code,
-            split_payment=client.split_payment,
+            split_payment=getattr(billing_client, 'split_payment', False),
             notes=notes,
             customer_notes=data.customer_notes,
+            stamp_duty_applied=stamp_duty_applied,
+            stamp_duty_amount=stamp_duty_amount,
+            payment_iban=payment_iban,
+            payment_reference=payment_reference,
         )
         
         # Aggiunge le righe
@@ -416,7 +485,29 @@ class InvoiceService:
             raise ConflictError("Errore durante la creazione della fattura")
         
         # Step 17: Ricarica con relazioni
-        return await self.get_by_id(db, invoice.id)
+        final_invoice = await self.get_by_id(db, invoice.id)
+        
+        # Controllare se esistono caparre pending (FEAT 2)
+        from app.services.deposit_service import DepositService
+        deposits = await DepositService.get_by_client(final_invoice.client_id, db)
+        
+        pending_deposits = [
+            d for d in deposits 
+            if d.status == DepositStatus.PENDING.value and (d.work_order_id == work_order_id or d.work_order_id is None)
+        ]
+        
+        pending_deposits_summary = None
+        if pending_deposits:
+            total_available = sum(d.amount for d in pending_deposits)
+            pending_deposits_summary = PendingDepositSummary(
+                deposits=pending_deposits,
+                total_amount=total_available
+            )
+            
+        return InvoiceCreationResponse(
+            invoice=final_invoice,
+            pending_deposits=pending_deposits_summary
+        )
 
     async def _generate_invoice_number(
         self,

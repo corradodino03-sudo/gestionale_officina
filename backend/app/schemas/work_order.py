@@ -25,6 +25,7 @@ from pydantic import (
 if TYPE_CHECKING:
     from app.schemas.part import PartUsageRead
     from app.schemas.invoice import InvoiceRead as InvoiceReadSchema
+    from app.schemas.technician import TechnicianRead
 
 
 # -------------------------------------------------------------------
@@ -129,6 +130,7 @@ class WorkOrderItemBase(BaseModel):
     quantity: Decimal = Field(default=Decimal("1"), ge=Decimal("0"), description="Quantità")
     unit_price: Decimal = Field(default=Decimal("0"), ge=Decimal("0"), description="Prezzo unitario")
     item_type: ItemType = Field(..., description="Tipo di voce: labor (manodopera) o service (intervento)")
+    technician_id: Optional[uuid.UUID] = Field(None, description="UUID del tecnico assegnato")
 
 
 class WorkOrderItemCreate(WorkOrderItemBase):
@@ -146,6 +148,7 @@ class WorkOrderItemUpdate(BaseModel):
     quantity: Optional[Decimal] = Field(None, ge=Decimal("0"))
     unit_price: Optional[Decimal] = Field(None, ge=Decimal("0"))
     item_type: Optional[ItemType] = None
+    technician_id: Optional[uuid.UUID] = None
 
 
 class WorkOrderItemRead(WorkOrderItemBase):
@@ -160,6 +163,7 @@ class WorkOrderItemRead(WorkOrderItemBase):
     work_order_id: uuid.UUID
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    technician: Optional["TechnicianRead"] = Field(None, description="Tecnico assegnato")
 
     @computed_field
     @property
@@ -194,6 +198,7 @@ class WorkOrderBase(BaseModel):
     km_out: Optional[int] = Field(None, ge=0, description="Chilometraggio alla consegna")
     estimated_delivery: Optional[datetime.date] = Field(None, description="Data prevista consegna")
     internal_notes: Optional[str] = Field(None, max_length=5000, description="Note interne")
+    assigned_technician_id: Optional[uuid.UUID] = Field(None, description="UUID del tecnico assegnato")
 
     @field_validator("problem_description")
     @classmethod
@@ -242,6 +247,7 @@ class WorkOrderUpdate(BaseModel):
     km_out: Optional[int] = Field(None, ge=0)
     estimated_delivery: Optional[datetime.date] = Field(None)
     internal_notes: Optional[str] = Field(None, max_length=5000)
+    assigned_technician_id: Optional[uuid.UUID] = Field(None)
 
     @field_validator("problem_description")
     @classmethod
@@ -283,6 +289,10 @@ class WorkOrderRead(WorkOrderBase):
     invoice: Optional["InvoiceReadSchema"] = Field(
         default=None,
         description="Fattura associata all'ordine"
+    )
+    assigned_technician: Optional["TechnicianRead"] = Field(
+        default=None,
+        description="Tecnico assegnato"
     )
 
     @computed_field

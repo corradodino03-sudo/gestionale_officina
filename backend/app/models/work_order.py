@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from app.models.vehicle import Vehicle
     from app.models.part import PartUsage
     from app.models.invoice import Invoice
+    from app.models.technician import Technician
 
 
 # Gli stati sono definiti in app.schemas.work_order.WorkOrderStatus
@@ -79,10 +80,18 @@ class WorkOrder(Base, UUIDMixin, TimestampMixin):
 
     vehicle_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
-        ForeignKey("vehicles.id", ondelete="CASCADE"),
+        ForeignKey("vehicles.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
         doc="UUID del veicolo oggetto dell'intervento",
+    )
+
+    assigned_technician_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("technicians.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        doc="UUID del tecnico assegnato",
     )
 
     # ------------------------------------------------------------
@@ -145,6 +154,13 @@ class WorkOrder(Base, UUIDMixin, TimestampMixin):
         back_populates="work_orders",
         lazy="joined",
         doc="Cliente proprietario del veicolo",
+    )
+
+    assigned_technician: Mapped[Optional["Technician"]] = relationship(
+        "Technician",
+        back_populates="work_orders",
+        lazy="joined",
+        doc="Tecnico assegnato all'ordine",
     )
 
     vehicle: Mapped["Vehicle"] = relationship(
@@ -248,6 +264,14 @@ class WorkOrderItem(Base, UUIDMixin, TimestampMixin):
         doc="UUID dell'ordine di lavoro padre",
     )
 
+    technician_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("technicians.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        doc="UUID del tecnico assegnato alla voce",
+    )
+
     # ------------------------------------------------------------
     # Colonne Dati
     # ------------------------------------------------------------
@@ -284,6 +308,13 @@ class WorkOrderItem(Base, UUIDMixin, TimestampMixin):
         "WorkOrder",
         back_populates="items",
         doc="Ordine di lavoro padre",
+    )
+
+    technician: Mapped[Optional["Technician"]] = relationship(
+        "Technician",
+        back_populates="work_order_items",
+        lazy="joined",
+        doc="Tecnico assegnato alla voce",
     )
 
     # ------------------------------------------------------------

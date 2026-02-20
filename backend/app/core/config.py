@@ -7,6 +7,7 @@ Definisce le impostazioni dell'applicazione caricate da variabili d'ambiente.
 
 from functools import lru_cache
 from typing import Literal
+from decimal import Decimal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -119,6 +120,51 @@ class Settings(BaseSettings):
     invoice_tax_id: str = Field(
         default="",
         description="Partita IVA",
+    )
+
+    invoice_iban: str = Field(
+        default="",
+        description="IBAN per pagamenti con bonifico",
+    )
+
+    invoice_pec: str = Field(
+        default="",
+        description="PEC dell'officina",
+    )
+
+    invoice_sdi_code: str = Field(
+        default="",
+        description="Codice SDI dell'officina",
+    )
+
+    invoice_logo_path: str | None = Field(
+        default=None,
+        description="Path relativo al logo (es. ./static/logo.png)",
+    )
+
+    invoice_vat_number: str = Field(
+        default="",
+        description="P.IVA officina",
+    )
+
+    invoice_rea_number: str | None = Field(
+        default=None,
+        description="Numero REA (es. MI-1234567)",
+    )
+
+    invoice_capital: str | None = Field(
+        default=None,
+        description="Capitale sociale (per S.r.l.)",
+    )
+
+    stamp_duty_amount: Decimal = Field(
+        default=Decimal("2.00"),
+        description="Importo marca da bollo",
+    )
+
+    stamp_duty_threshold: Decimal = Field(
+        default=Decimal("77.47"),
+        description="Soglia per marca da bollo",
     )
 
     invoice_address: str = Field(

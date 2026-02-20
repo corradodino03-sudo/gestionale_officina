@@ -53,6 +53,7 @@ class PartService:
         search: Optional[str] = None,
         is_active: Optional[bool] = None,
         below_minimum: bool = False,
+        category_id: Optional[uuid.UUID] = None,
         page: int = 1,
         per_page: int = 20,
     ) -> Tuple[list[Part], int]:
@@ -93,7 +94,12 @@ class PartService:
         if below_minimum:
             query = query.filter(Part.stock_quantity < Part.min_stock_level)
             count_query = count_query.filter(Part.stock_quantity < Part.min_stock_level)
-        
+
+        # Filtro category_id
+        if category_id is not None:
+            query = query.filter(Part.category_id == category_id)
+            count_query = count_query.filter(Part.category_id == category_id)
+
         # Ordine
         query = query.order_by(Part.code.asc())
         
@@ -196,6 +202,8 @@ class PartService:
             min_stock_level=data.min_stock_level or 0,
             location=data.location,
             is_active=data.is_active if data.is_active is not None else True,
+            category_id=data.category_id,
+            unit_of_measure=data.unit_of_measure.value if data.unit_of_measure else "pz",
         )
         
         db.add(part)
@@ -261,6 +269,10 @@ class PartService:
             part.location = data.location
         if data.is_active is not None:
             part.is_active = data.is_active
+        if data.category_id is not None:
+            part.category_id = data.category_id
+        if data.unit_of_measure is not None:
+            part.unit_of_measure = data.unit_of_measure.value
         
         await db.flush()
         await db.refresh(part)
@@ -524,6 +536,7 @@ class PartService:
             part_id=data.part_id,
             quantity=data.quantity,
             unit_price=unit_price,
+            unit_of_measure=part.unit_of_measure,
         )
         
         db.add(part_usage)

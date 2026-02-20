@@ -7,7 +7,7 @@ Rappresenta l'anagrafica dei clienti (persone fisiche e giuridiche).
 
 from typing import TYPE_CHECKING, List
 
-from sqlalchemy import Boolean, Index, String, Text
+from sqlalchemy import Boolean, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from app.models.vehicle import Vehicle
     from app.models.work_order import WorkOrder
     from app.models.invoice import Invoice, Payment
+    from app.models.intent_declaration import IntentDeclaration
 
 
 class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
@@ -205,6 +206,90 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
 
     # ------------------------------------------------------------
+    # Colonne Aliquota IVA Predefinita (FEAT 1)
+    # ------------------------------------------------------------
+    default_vat_rate: Mapped[float] = mapped_column(
+        Float,
+        default=22.00,
+        nullable=False,
+        doc="Aliquota IVA predefinita del cliente (default 22%)",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne Condizioni Pagamento Predefinite (FEAT 2)
+    # ------------------------------------------------------------
+    payment_terms_days: Mapped[int] = mapped_column(
+        Integer,
+        default=30,
+        nullable=False,
+        doc="Giorni per la scadenza fattura dalla data emissione (default 30)",
+    )
+
+    payment_method_default: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        doc="Metodo di pagamento predefinito: cash, pos, bank_transfer, check, other",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne Sconto Predefinito Cliente (FEAT 3)
+    # ------------------------------------------------------------
+    default_discount_percent: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        doc="Sconto predefinito percentuale (0-100). Es: 10.00 = 10% di sconto",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne Indirizzo Sede Legale (FEAT 5)
+    # ------------------------------------------------------------
+    # I campi address, city, zip_code, province rappresentano la SEDE LEGALE
+    # I campi billing_* rappresentano la SEDE DI FATTURAZIONE (opzionali)
+
+    # ------------------------------------------------------------
+    # Colonne Indirizzo Sede di Fatturazione (FEAT 5)
+    # ------------------------------------------------------------
+    billing_address: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        doc="Indirizzo sede di fatturazione (se diverso dalla sede legale)",
+    )
+
+    billing_city: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        doc="Città sede di fatturazione",
+    )
+
+    billing_zip_code: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+        doc="CAP sede di fatturazione",
+    )
+
+    billing_province: Mapped[str | None] = mapped_column(
+        String(2),
+        nullable=True,
+        doc="Sigla provincia sede di fatturazione (2 caratteri)",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne Fido Commerciale (FEAT 7)
+    # ------------------------------------------------------------
+    credit_limit: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        doc="Fido massimo accordato al cliente. None = nessun limite",
+    )
+
+    credit_limit_action: Mapped[str] = mapped_column(
+        String(10),
+        default="warn",
+        nullable=False,
+        doc="Azione se superato fido: 'block' blocca fattura, 'warn' avvisa",
+    )
+
+    # ------------------------------------------------------------
     # Relationships
     # ------------------------------------------------------------
     vehicles: Mapped[List["Vehicle"]] = relationship(
@@ -234,6 +319,41 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         lazy="noload",
         doc="Pagamenti effettuati dal cliente",
     )
+
+    intent_declarations: Mapped[List["IntentDeclaration"]] = relationship(
+        "IntentDeclaration",
+        back_populates="client",
+        lazy="noload",
+        doc="Dichiarazioni di intento del cliente",
+    )
+
+    # ------------------------------------------------------------
+    # Properties Calcolate (FEAT 5)
+    # ------------------------------------------------------------
+    @property
+    def effective_billing_address(self) -> dict:
+        """
+        Restituisce i dati di fatturazione effettivi.
+        
+        Se la sede di fatturazione è specificata, la usa;
+        altrimenti restituisce i dati della sede legale.
+        
+        Returns:
+            dict con chiavi: address, city, zip_code, province
+        """
+        if self.billing_address:
+            return {
+                "address": self.billing_address,
+                "city": self.billing_city,
+                "zip_code": self.billing_zip_code,
+                "province": self.billing_province,
+            }
+        return {
+            "address": self.address,
+            "city": self.city,
+            "zip_code": self.zip_code,
+            "province": self.province,
+        }
 
     # ------------------------------------------------------------
     # Indici

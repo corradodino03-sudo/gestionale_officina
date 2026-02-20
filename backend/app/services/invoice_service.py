@@ -24,6 +24,7 @@ from app.core.exceptions import (
 )
 from app.models import Invoice, InvoiceLine, PartUsage, Payment, PaymentAllocation, WorkOrder
 from app.models.client import Client
+from app.models.intent_declaration import IntentDeclaration
 from app.schemas.invoice import (
     CreateInvoiceFromWorkOrder,
     InvoiceList,
@@ -70,14 +71,21 @@ class InvoiceService:
         6. Calcola subtotal sommando:
            - work_order_items (manodopera/servizi)
            - part_usages (ricambi)
-        7. Applica regime fiscale cliente:
-           - Se vat_exemption: vat_amount = 0
-           - Se split_payment: vat_amount calcolato ma non incassato
+        7. Applica regime fiscale cliente (FEAT 4):
+           - Se RF19 (Forfettario): IVA = 0%, aggiungi dicitura legale
+           - Se RF02 (Minimi): IVA = 0%, aggiungi dicitura legale
+           - Se vat_exemption: IVA = 0%, usa vat_exemption_code
            - Altrimenti: vat_amount = subtotal * vat_rate / 100
-        8. Crea InvoiceLines da work_order_items e part_usages
-        9. Crea Invoice
-        10. Cambia stato work_order a "invoiced"
-        11. Restituisci Invoice con relazioni caricate
+        8. FEAT 1: Usa client.default_vat_rate come fallback se non specificato
+        9. FEAT 2: Calcola due_date usando client.payment_terms_days
+        10. FEAT 3: Applica default_discount_percent a ogni riga
+        11. FEAT 5: Usa effective_billing_address per dati fatturazione
+        12. FEAT 6: Verifica e aggiorna dichiarazione di intento
+        13. FEAT 7: Verifica credito e blocca/warna se superato
+        14. Crea InvoiceLines da work_order_items e part_usages
+        15. Crea Invoice
+        16. Cambia stato work_order a "invoiced"
+        17. Restituisci Invoice con relazioni caricate
         
         Args:
             db: Sessione database
@@ -93,7 +101,6 @@ class InvoiceService:
             ConflictError: errore di integrità (numero fattura duplicato)
         """
         # Step 1: Verifica esistenza work_order
-        # P0-Fix 1: Aggiunto selectinload(WorkOrder.invoice) per lazy load
         stmt = (
             select(WorkOrder)
             .where(WorkOrder.id == work_order_id)
@@ -134,46 +141,106 @@ class InvoiceService:
         invoice_date = data.invoice_date or date.today()
         invoice_number = await self._generate_invoice_number(db, invoice_date)
         
+        # FEAT 1: Determina l'aliquota IVA da usare
+        # Se specificata nella richiesta, usa quella; altrimenti usa default del cliente
+        effective_vat_rate = data.vat_rate
+        if effective_vat_rate is None:
+            # Usa il default del cliente se disponibile, altrimenti 22%
+            effective_vat_rate = Decimal("22.00")
+        
+        # FEAT 4: Determina il regime IVA in base a vat_regime e vat_exemption
+        # La logica ha precedenza su default_vat_rate quando il regime lo impone
+        is_vat_exempt = False
+        vat_exemption_code = client.vat_exemption_code
+        vat_notes = None
+        
+        # Controlla il regime fiscale del cliente
+        if client.vat_regime == "RF19":  # Forfettario
+            is_vat_exempt = True
+            effective_vat_rate = Decimal("0")
+            vat_exemption_code = "N3.5"  # Non imponibili - dichiarazioni intento
+            vat_notes = "Operazione effettuata ai sensi dell'art. 1, commi 54-89, L. 190/2014 - Regime Forfettario"
+        elif client.vat_regime == "RF02":  # Minimi
+            is_vat_exempt = True
+            effective_vat_rate = Decimal("0")
+            vat_exemption_code = "N3.5"
+            vat_notes = "Operazione effettuata ai sensi dell'art. 27, commi 1 e 2, D.L. 98/2011 - Regime dei Minimi"
+        elif client.vat_exemption:  # Esente IVA generico
+            is_vat_exempt = True
+            effective_vat_rate = Decimal("0")
+            # vat_exemption_code è già valorizzato dal cliente
+        
         # Step 6: Calcola subtotal da work_order items e part_usages
         subtotal = Decimal("0")
         
-        # P0-Fix 4: Rimosso blocco if not work_order.items ridondante
-        # La validazione if subtotal <= 0 già gestisce il caso ordine vuoto
-        
-        # Processa work_order_items (manodopera/servizi)
         line_number = 1
         invoice_lines = []
+        total_vat = Decimal("0")
+        
+        # FEAT 3: Determina lo sconto predefinito del cliente
+        default_discount_percent = float(client.default_discount_percent) if client.default_discount_percent else 0.0
         
         for item in work_order.items:
             item_subtotal = item.quantity * item.unit_price
-            subtotal += item_subtotal
+            
+            # FEAT 3: Applica sconto predefinito se presente
+            discount_percent = default_discount_percent
+            discount_amount = Decimal("0")
+            if discount_percent > 0:
+                discount_amount = (item_subtotal * Decimal(str(discount_percent))) / Decimal("100")
+            
+            subtotal += (item_subtotal - discount_amount)
+            
+            # Usa effective_vat_rate (potrebbe essere 0 per regimi speciali)
+            item_vat_rate = effective_vat_rate
+            item_vat = ((item_subtotal - discount_amount) * item_vat_rate) / Decimal("100")
+            total_vat += item_vat
             
             invoice_line = InvoiceLine(
                 line_type=item.item_type,
                 description=item.description,
                 quantity=item.quantity,
                 unit_price=item.unit_price,
-                vat_rate=data.vat_rate,
+                discount_percent=discount_percent,
+                discount_amount=discount_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                vat_rate=item_vat_rate,
                 line_number=line_number,
             )
             invoice_lines.append(invoice_line)
             line_number += 1
         
         # Processa part_usages (ricambi)
-        # P0-Fix 5: Gestito part_usage.part potenzialmente None
         for part_usage in work_order.part_usages:
             part_subtotal = part_usage.quantity * part_usage.unit_price
-            subtotal += part_subtotal
             
             part_desc = part_usage.part.description if part_usage.part else "Ricambio non disponibile"
             description = f"{part_desc} (x{part_usage.quantity})"
+            
+            # FEAT 3: Applica sconto predefinito se presente
+            discount_percent = default_discount_percent
+            discount_amount = Decimal("0")
+            if discount_percent > 0:
+                discount_amount = (part_subtotal * Decimal(str(discount_percent))) / Decimal("100")
+            
+            subtotal += (part_subtotal - discount_amount)
+            
+            # FEAT 1: Leggi l'aliquota dal Part se disponibile, altrimenti usa effective_vat_rate
+            if part_usage.part and hasattr(part_usage.part, 'vat_rate'):
+                part_vat_rate = part_usage.part.vat_rate or effective_vat_rate
+            else:
+                part_vat_rate = effective_vat_rate
+            
+            part_vat = ((part_subtotal - discount_amount) * part_vat_rate) / Decimal("100")
+            total_vat += part_vat
             
             invoice_line = InvoiceLine(
                 line_type="part",
                 description=description,
                 quantity=part_usage.quantity,
                 unit_price=part_usage.unit_price,
-                vat_rate=data.vat_rate,
+                discount_percent=discount_percent,
+                discount_amount=discount_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                vat_rate=part_vat_rate,
                 line_number=line_number,
             )
             invoice_lines.append(invoice_line)
@@ -187,23 +254,125 @@ class InvoiceService:
         # Arrotonda subtotal a 2 decimali
         subtotal = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         
-        # Step 7: Applica regime fiscale
-        due_date = data.due_date or (invoice_date + timedelta(days=30))
+        # FEAT 2: Calcola la data di scadenza usando payment_terms_days del cliente
+        if data.due_date:
+            due_date = data.due_date
+        else:
+            # Usa i giorni predefiniti del cliente (default 30)
+            payment_terms = getattr(client, 'payment_terms_days', 30) or 30
+            due_date = invoice_date + timedelta(days=payment_terms)
         
-        if client.vat_exemption:
-            # Esenzione IVA
+        # Calcola IVA
+        if is_vat_exempt:
             vat_amount = Decimal("0")
         else:
-            # Calcolo IVA normale
-            vat_amount = (subtotal * data.vat_rate) / Decimal("100")
-            # Arrotonda IVA a 2 decimali
-            vat_amount = vat_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            vat_amount = total_vat.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         
         total = subtotal + vat_amount
         # Arrotonda total a 2 decimali
         total = total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         
-        # Step 8-9: Crea Invoice
+        # FEAT 5: Prepara indirizzo fatturazione effettivo
+        billing_address = client.effective_billing_address if hasattr(client, 'effective_billing_address') else {
+            "address": client.address,
+            "city": client.city,
+            "zip_code": client.zip_code,
+            "province": client.province,
+        }
+        
+        # FEAT 6: Gestione dichiarazioni di intento
+        # Se il cliente ha una dichiarazione di intento attiva e valida
+        active_intent = None
+        if not is_vat_exempt:  # Solo se non già esente per altro motivo
+            # Cerca dichiarazione di intento attiva e valida
+            intent_stmt = (
+                select(IntentDeclaration)
+                .where(
+                    IntentDeclaration.client_id == client.id,
+                    IntentDeclaration.is_active == True,
+                    IntentDeclaration.expiry_date >= invoice_date,
+                )
+                .order_by(IntentDeclaration.expiry_date.desc())
+            )
+            intent_result = await db.execute(intent_stmt)
+            active_intent = intent_result.scalar_one_or_none()
+            
+            if active_intent and active_intent.remaining_amount >= total:
+                # Usa la dichiarazione di intento - IVA = 0%
+                is_vat_exempt = True
+                effective_vat_rate = Decimal("0")
+                vat_amount = Decimal("0")
+                vat_exemption_code = "N3.5"
+                vat_notes = "Operazione effettuata ai sensi dell'art. 1, c. 100, L. 244/2007 - Dichiarazione di intento"
+                
+                # Ricalcola il total senza IVA
+                total = subtotal
+                
+                # Aggiorna used_amount
+                active_intent.used_amount = (active_intent.used_amount + total).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+            elif active_intent and active_intent.remaining_amount < total:
+                # Superato il plafond
+                raise BusinessValidationError(
+                    f"Impossibile emettere fattura: l'importo ({total}) supera il plafond residuo "
+                    f"della dichiarazione di intento ({active_intent.remaining_amount}). "
+                    f"Plafond dichiarato: {active_intent.amount_limit}, "
+                    f"già utilizzato: {active_intent.used_amount}"
+                )
+        
+        # FEAT 7: Controllo fido commerciale
+        credit_limit_warning = None
+        if client.credit_limit is not None and client.credit_limit > 0:
+            # Calcola l'esposizione corrente del cliente
+            # Approccio: total_fatture - total_pagamenti (semplificato)
+            # Poiché status è una computed property, non possiamo filtrare via SQL
+            
+            # Get total of all invoices for this client
+            total_invoices_stmt = (
+                select(func.coalesce(func.sum(Invoice.total), 0))
+                .where(Invoice.client_id == client.id)
+            )
+            total_invoices_result = await db.execute(total_invoices_stmt)
+            total_invoiced = total_invoices_result.scalar() or Decimal("0")
+            
+            # Get total of all payments allocated to this client's invoices
+            total_payments_stmt = (
+                select(func.coalesce(func.sum(Payment.amount), 0))
+                .join(PaymentAllocation)
+                .join(Invoice)
+                .where(Invoice.client_id == client.id)
+            )
+            total_payments_result = await db.execute(total_payments_stmt)
+            total_paid = total_payments_result.scalar() or Decimal("0")
+            
+            current_exposure = total_invoiced - total_paid
+            new_exposure = current_exposure + total
+            
+            if new_exposure > Decimal(str(client.credit_limit)):
+                if client.credit_limit_action == "block":
+                    raise BusinessValidationError(
+                        f"Impossibile emettere fattura: il cliente ha superato il fido accordato. "
+                        f"Esposizione attuale: {current_exposure}, "
+                        f"nuovo importo: {total}, "
+                        f"totale: {new_exposure}, "
+                        f"fido: {client.credit_limit}"
+                    )
+                else:
+                    # WARN - aggiungi nota di avviso
+                    credit_limit_warning = (
+                        f"ATTENZIONE: Superato il fido accordato ({client.credit_limit}). "
+                        f"Esposizione attuale: {current_exposure}, nuovo importo: {total}"
+                    )
+        
+        # Combina le note
+        notes = data.customer_notes or ""
+        if vat_notes:
+            notes = f"{notes}\n{vat_notes}".strip()
+        if credit_limit_warning:
+            notes = f"{notes}\n{credit_limit_warning}".strip()
+        
+        # Step 14-15: Crea Invoice
         invoice = Invoice(
             work_order_id=work_order_id,
             client_id=client.id,
@@ -211,13 +380,13 @@ class InvoiceService:
             invoice_date=invoice_date,
             due_date=due_date,
             subtotal=subtotal,
-            vat_rate=data.vat_rate,
+            vat_rate=effective_vat_rate,
             vat_amount=vat_amount,
             total=total,
-            vat_exemption=client.vat_exemption,
-            vat_exemption_code=client.vat_exemption_code,
+            vat_exemption=is_vat_exempt,
+            vat_exemption_code=vat_exemption_code,
             split_payment=client.split_payment,
-            notes=None,
+            notes=notes,
             customer_notes=data.customer_notes,
         )
         
@@ -228,7 +397,7 @@ class InvoiceService:
         # Salva nel database
         db.add(invoice)
         
-        # Step 10: Cambia stato work_order
+        # Step 16: Cambia stato work_order
         work_order.status = "invoiced"
         
         try:
@@ -239,7 +408,7 @@ class InvoiceService:
             logger.error(f"Errore di integrità durante creazione fattura: {e}")
             raise ConflictError("Errore durante la creazione della fattura")
         
-        # Step 11: Ricarica con relazioni
+        # Step 17: Ricarica con relazioni
         return await self.get_by_id(db, invoice.id)
 
     async def _generate_invoice_number(

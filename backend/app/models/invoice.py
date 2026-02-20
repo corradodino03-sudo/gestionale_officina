@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, List
 from sqlalchemy import (
     CheckConstraint,
     Date,
+    Float,
     Index,
     Numeric,
     String,
@@ -345,6 +346,23 @@ class InvoiceLine(Base, UUIDMixin, TimestampMixin):
         doc="Prezzo unitario",
     )
 
+    # ------------------------------------------------------------
+    # Colonne Sconto (FEAT 3)
+    # ------------------------------------------------------------
+    discount_percent: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=0.0,
+        doc="Percentuale di sconto applicata alla riga (0-100)",
+    )
+
+    discount_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=Decimal("0"),
+        doc="Importo sconto calcolato",
+    )
+
     vat_rate: Mapped[Decimal] = mapped_column(
         Numeric(5, 2),
         nullable=False,
@@ -371,14 +389,23 @@ class InvoiceLine(Base, UUIDMixin, TimestampMixin):
     # ------------------------------------------------------------
     @property
     def subtotal(self) -> Decimal:
-        """Imponibile riga (senza IVA)."""
-        return (self.quantity * self.unit_price).quantize(
+        """
+        Imponibile riga (senza IVA), TENENDO CONTO DELLO SCONTO.
+        
+        Formula: (quantity * unit_price) - discount_amount
+        """
+        gross = self.quantity * self.unit_price
+        return (gross - self.discount_amount).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
 
     @property
     def vat_amount(self) -> Decimal:
-        """Importo IVA riga."""
+        """
+        Importo IVA riga.
+        
+        L'IVA si applica sull'imponibile (già scontato).
+        """
         result = (self.subtotal * self.vat_rate) / Decimal("100")
         return result.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
@@ -401,6 +428,11 @@ class InvoiceLine(Base, UUIDMixin, TimestampMixin):
         # Vincoli di check sugli importi
         CheckConstraint("quantity > 0", name="ck_invoice_lines_quantity_positive"),
         CheckConstraint("unit_price >= 0", name="ck_invoice_lines_unit_price_positive"),
+        # Vincolo sconto (FEAT 3)
+        CheckConstraint(
+            "discount_percent >= 0 AND discount_percent <= 100",
+            name="ck_invoice_lines_discount_percent",
+        ),
     )
 
     # ------------------------------------------------------------

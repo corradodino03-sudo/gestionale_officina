@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import BusinessValidationError, NotFoundError
 from app.models import Client, Vehicle, WorkOrder, WorkOrderItem
+from app.models.part import Part, PartUsage, StockMovement
 from app.schemas.work_order import (
     VALID_TRANSITIONS,
     WorkOrderCreate,
@@ -357,6 +358,7 @@ class WorkOrderService:
         Elimina un ordine di lavoro.
         
         Solo gli ordini in stato 'draft' o 'cancelled' possono essere eliminati.
+        Se l'ordine ha PartUsage associati, il magazzino viene ripristinato.
         
         Args:
             db: Sessione database
@@ -366,7 +368,7 @@ class WorkOrderService:
             NotFoundError: Se l'ordine non esiste
             ValidationError: Se l'ordine non è in stato draft o cancelled
         """
-        # Recupera l'ordine
+        # Recupera l'ordine con i part_usages
         work_order = await self.get_by_id(db, work_order_id)
 
         # Verifica che sia in stato draft o cancelled
@@ -380,6 +382,38 @@ class WorkOrderService:
             raise BusinessValidationError(
                 "Solo ordini in bozza o annullati possono essere eliminati"
             )
+
+        # FIX 1: Se l'ordine ha PartUsage, ripristina il magazzino
+        if work_order.part_usages:
+            for part_usage in work_order.part_usages:
+                # Carica il part se non già caricato
+                if not part_usage.part:
+                    part_result = await db.execute(
+                        select(Part).where(Part.id == part_usage.part_id)
+                    )
+                    part = part_result.scalar_one_or_none()
+                else:
+                    part = part_usage.part
+                
+                if part:
+                    # Incrementa la giacenza
+                    part.stock_quantity = part.stock_quantity + part_usage.quantity
+                    
+                    # Crea movimento di magazzino di tipo IN
+                    movement = StockMovement(
+                        part_id=part.id,
+                        movement_type="in",
+                        quantity=part_usage.quantity,
+                        reference=f"Ripristino da annullamento OdL {work_order_id}",
+                        notes=f"Ripristino magazzino per annullamento ordine di lavoro",
+                    )
+                    db.add(movement)
+                    
+                    logger.info(
+                        "Ripristinato magazzino per ricambio %s: qty=%s",
+                        part.code,
+                        part_usage.quantity
+                    )
 
         await db.delete(work_order)
         await db.flush()
@@ -440,7 +474,55 @@ class WorkOrderService:
         if new_status == WorkOrderStatus.COMPLETED:
             # Imposta completed_at se completato
             work_order.completed_at = datetime.datetime.now(datetime.timezone.utc)
+            
+            # FIX 6: Aggiorna il chilometraggio del veicolo se km_out è presente
+            if work_order.km_out and work_order.vehicle:
+                vehicle_result = await db.execute(
+                    select(Vehicle).where(Vehicle.id == work_order.vehicle_id)
+                )
+                vehicle = vehicle_result.scalar_one_or_none()
+                if vehicle and (vehicle.current_km is None or work_order.km_out > vehicle.current_km):
+                    vehicle.current_km = work_order.km_out
+                    logger.info(
+                        "Aggiornato chilometraggio veicolo %s: %s km",
+                        vehicle.plate,
+                        work_order.km_out
+                    )
             logger.info("Ordine %s completato", work_order_id)
+        
+        elif new_status == WorkOrderStatus.CANCELLED:
+            # FIX 1: Se l'ordine ha PartUsage, ripristina il magazzino
+            if work_order.part_usages:
+                for part_usage in work_order.part_usages:
+                    # Carica il part se non già caricato
+                    if not getattr(part_usage, 'part', None):
+                        part_result = await db.execute(
+                            select(Part).where(Part.id == part_usage.part_id)
+                        )
+                        part = part_result.scalar_one_or_none()
+                    else:
+                        part = part_usage.part
+                    
+                    if part:
+                        # Incrementa la giacenza
+                        part.stock_quantity = part.stock_quantity + part_usage.quantity
+                        
+                        # Crea movimento di magazzino di tipo IN
+                        movement = StockMovement(
+                            part_id=part.id,
+                            movement_type="in",
+                            quantity=part_usage.quantity,
+                            reference=f"Ripristino da cancellazione OdL {work_order_id}",
+                            notes=f"Ripristino magazzino per cancellazione ordine di lavoro",
+                        )
+                        db.add(movement)
+                        
+                        logger.info(
+                            "Ripristinato magazzino per ricambio %s: qty=%s",
+                            part.code,
+                            part_usage.quantity
+                        )
+            logger.info("Ordine %s cancellato, magazzino ripristinato", work_order_id)
         
         elif new_status == WorkOrderStatus.IN_PROGRESS:
             # Se si riapre un ordine completato, resetta completed_at

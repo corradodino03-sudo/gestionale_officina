@@ -84,6 +84,14 @@ class InvoiceLineBase(BaseModel):
         description="Prezzo unitario",
         serialization_alias="unitPrice"
     )
+    # FEAT 3: Sconto sulla riga
+    discount_percent: float = Field(
+        default=0.0,
+        ge=0,
+        le=100,
+        description="Percentuale di sconto applicata (0-100)",
+        serialization_alias="discountPercent"
+    )
     vat_rate: Decimal = Field(
         ...,
         ge=0,
@@ -113,12 +121,23 @@ class InvoiceLineRead(InvoiceLineBase):
     invoice_id: uuid.UUID = Field(..., description="UUID della fattura")
     created_at: date = Field(..., description="Data/ora creazione")
     updated_at: date = Field(..., description="Data/ora ultimo aggiornamento")
+    # FEAT 3: Importo sconto
+    discount_amount: Decimal = Field(
+        default=Decimal("0"),
+        description="Importo sconto calcolato",
+        serialization_alias="discountAmount"
+    )
     
     @computed_field
     @property
     def subtotal(self) -> Decimal:
-        """Imponibile riga (senza IVA)."""
-        return self.quantity * self.unit_price
+        """
+        Imponibile riga (senza IVA), TENENDO CONTO DELLO SCONTO.
+        
+        Formula: (quantity * unit_price) - discount_amount
+        """
+        gross = self.quantity * self.unit_price
+        return gross - self.discount_amount
     
     @computed_field
     @property

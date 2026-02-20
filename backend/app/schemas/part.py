@@ -42,6 +42,8 @@ class PartBase(BaseModel):
     compatible_models: Optional[str] = Field(None, description="Modelli di veicolo compatibili")
     purchase_price: Decimal = Field(default=Decimal("0"), ge=0, description="Prezzo di acquisto")
     sale_price: Decimal = Field(default=Decimal("0"), ge=0, description="Prezzo di vendita")
+    # FIX 5: Aggiunto campo vat_rate per gestione IVA per ricambio
+    vat_rate: Decimal = Field(default=Decimal("22.00"), ge=Decimal("0"), le=Decimal("100"), description="Aliquota IVA del ricambio")
     min_stock_level: int = Field(default=0, ge=0, description="Livello minimo giacenza per alert")
     location: Optional[str] = Field(None, max_length=50, description="Posizione fisica in magazzino")
     is_active: bool = Field(default=True, description="Indica se il ricambio è attivo")
@@ -98,6 +100,8 @@ class PartUpdate(BaseModel):
     compatible_models: Optional[str] = Field(None, max_length=255, description="Modelli compatibili")
     purchase_price: Optional[Decimal] = Field(None, ge=0, description="Prezzo di acquisto")
     sale_price: Optional[Decimal] = Field(None, ge=0, description="Prezzo di vendita")
+    # FIX 5: Aggiunto campo vat_rate per aggiornamento
+    vat_rate: Optional[Decimal] = Field(None, ge=Decimal("0"), le=Decimal("100"), description="Aliquota IVA")
     min_stock_level: Optional[int] = Field(None, ge=0, description="Livello minimo giacenza")
     location: Optional[str] = Field(None, max_length=50, description="Posizione in magazzino")
     is_active: Optional[bool] = Field(None, description="Attivo/disponibile")

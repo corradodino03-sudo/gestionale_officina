@@ -21,6 +21,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.schemas.invoice import PaymentMethod
 from app.core.exceptions import BusinessValidationError
 
 # Logger per questo modulo
@@ -277,6 +278,7 @@ class ClientValidatorsMixin(BaseModel):
     vat_exemption_code: Optional[VatExemptionCode] = None
     split_payment: Optional[bool] = None
     is_company: Optional[bool] = None
+    credit_limit_action: Optional[str] = None
     
     # NOTA: Dichiarazione campi rimossa per evitare conflitti di ereditarietà.
     # I validator usano check_fields=False per funzionare correttamente.
@@ -337,6 +339,16 @@ class ClientValidatorsMixin(BaseModel):
                 "Il codice paese deve essere esattamente 2 caratteri alfabetici (ISO 3166-1 alpha-2)"
             )
         return normalized
+    
+    @field_validator("credit_limit_action", mode="before", check_fields=False)
+    @classmethod
+    def validate_credit_limit_action(cls, v: Optional[str]) -> Optional[str]:
+        """Valida che credit_limit_action sia 'block' o 'warn'."""
+        if v is None:
+            return v
+        if v not in ("block", "warn"):
+            raise ValueError("credit_limit_action deve essere 'block' o 'warn'")
+        return v
     
     @model_validator(mode="after")
     def validate_fiscal_consistency(self) -> "ClientValidatorsMixin":
@@ -612,6 +624,88 @@ class ClientBase(ClientValidatorsMixin):
         description="True per enti pubblici soggetti a split payment",
     )
 
+    # ------------------------------------------------------------
+    # Aliquota IVA Predefinita (FEAT 1)
+    # ------------------------------------------------------------
+    default_vat_rate: float = Field(
+        default=22.00,
+        ge=0,
+        le=100,
+        description="Aliquota IVA predefinita del cliente (default 22%)",
+    )
+
+    # ------------------------------------------------------------
+    # Condizioni Pagamento Predefinite (FEAT 2)
+    # ------------------------------------------------------------
+    payment_terms_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Giorni per la scadenza fattura dalla data emissione (default 30)",
+    )
+
+    payment_method_default: Optional[PaymentMethod] = Field(
+        None,
+        description="Metodo di pagamento predefinito: cash, pos, bank_transfer, check, other",
+    )
+
+    # ------------------------------------------------------------
+    # Sconto Predefinito Cliente (FEAT 3)
+    # ------------------------------------------------------------
+    default_discount_percent: Optional[float] = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Sconto predefinito percentuale (0-100). Es: 10.00 = 10% di sconto",
+    )
+
+    # ------------------------------------------------------------
+    # Indirizzo Sede Legale (FEAT 5)
+    # ------------------------------------------------------------
+    # I campi address, city, zip_code, province rappresentano la SEDE LEGALE
+    # I campi billing_* rappresentano la SEDE DI FATTURAZIONE (opzionali)
+
+    # ------------------------------------------------------------
+    # Indirizzo Sede di Fatturazione (FEAT 5)
+    # ------------------------------------------------------------
+    billing_address: Optional[str] = Field(
+        None,
+        max_length=255,
+        description="Indirizzo sede di fatturazione (se diverso dalla sede legale)",
+    )
+
+    billing_city: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Città sede di fatturazione",
+    )
+
+    billing_zip_code: Optional[str] = Field(
+        None,
+        max_length=10,
+        description="CAP sede di fatturazione",
+    )
+
+    billing_province: Optional[str] = Field(
+        None,
+        max_length=3,
+        description="Sigla provincia sede di fatturazione (2-3 caratteri)",
+    )
+
+    # ------------------------------------------------------------
+    # Fido Commerciale (FEAT 7)
+    # ------------------------------------------------------------
+    credit_limit: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Fido massimo accordato al cliente. None = nessun limite",
+    )
+
+    credit_limit_action: str = Field(
+        default="warn",
+        description="Azione se superato fido: 'block' blocca fattura, 'warn' avvisa",
+    )
+
 
 # -------------------------------------------------------------------
 # Schemas per Creazione
@@ -788,6 +882,82 @@ class ClientUpdate(ClientValidatorsMixin):
     split_payment: Optional[bool] = Field(
         None,
         description="True per enti pubblici soggetti a split payment",
+    )
+
+    # ------------------------------------------------------------
+    # Aliquota IVA Predefinita (FEAT 1)
+    # ------------------------------------------------------------
+    default_vat_rate: Optional[float] = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Aliquota IVA predefinita del cliente",
+    )
+
+    # ------------------------------------------------------------
+    # Condizioni Pagamento Predefinite (FEAT 2)
+    # ------------------------------------------------------------
+    payment_terms_days: Optional[int] = Field(
+        None,
+        ge=1,
+        le=365,
+        description="Giorni per la scadenza fattura dalla data emissione",
+    )
+
+    payment_method_default: Optional[PaymentMethod] = Field(
+        None,
+        description="Metodo di pagamento predefinito",
+    )
+
+    # ------------------------------------------------------------
+    # Sconto Predefinito Cliente (FEAT 3)
+    # ------------------------------------------------------------
+    default_discount_percent: Optional[float] = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Sconto predefinito percentuale (0-100)",
+    )
+
+    # ------------------------------------------------------------
+    # Indirizzo Sede di Fatturazione (FEAT 5)
+    # ------------------------------------------------------------
+    billing_address: Optional[str] = Field(
+        None,
+        max_length=255,
+        description="Indirizzo sede di fatturazione",
+    )
+
+    billing_city: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Città sede di fatturazione",
+    )
+
+    billing_zip_code: Optional[str] = Field(
+        None,
+        max_length=10,
+        description="CAP sede di fatturazione",
+    )
+
+    billing_province: Optional[str] = Field(
+        None,
+        max_length=3,
+        description="Sigla provincia sede di fatturazione",
+    )
+
+    # ------------------------------------------------------------
+    # Fido Commerciale (FEAT 7)
+    # ------------------------------------------------------------
+    credit_limit: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Fido massimo accordato al cliente",
+    )
+
+    credit_limit_action: Optional[str] = Field(
+        None,
+        description="Azione se superato fido: 'block' o 'warn'",
     )
 
 

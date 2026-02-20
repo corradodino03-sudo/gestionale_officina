@@ -14,8 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.exceptions import DuplicateError, NotFoundError
-from app.models import Client, Vehicle
+from app.core.exceptions import BusinessValidationError, DuplicateError, NotFoundError
+from app.models import Client, Vehicle, WorkOrder
 from app.schemas.vehicle import VehicleCreate, VehicleUpdate
 
 # Logger per questo modulo
@@ -59,6 +59,9 @@ class VehicleService:
         """
         # Build filter conditions
         filter_conditions = []
+        
+        # FIX 4: Filtra solo veicoli attivi di default
+        filter_conditions.append(Vehicle.is_active == True)
         
         # Filtro per cliente
         if client_id is not None:
@@ -112,6 +115,7 @@ class VehicleService:
         Recupera un veicolo tramite ID.
         
         Usa selectinload per caricare il cliente insieme al veicolo.
+        FIX 4: Filtra solo veicoli attivi.
         
         Args:
             db: Sessione database
@@ -127,6 +131,7 @@ class VehicleService:
             select(Vehicle)
             .options(selectinload(Vehicle.client))
             .where(Vehicle.id == vehicle_id)
+            .where(Vehicle.is_active == True)
         )
         vehicle = result.scalar_one_or_none()
 
@@ -270,7 +275,10 @@ class VehicleService:
         vehicle_id: uuid.UUID,
     ) -> None:
         """
-        Elimina un veicolo.
+        Elimina un veicolo (soft delete).
+        
+        FIX 3: Verifica che non esistano OdL attivi prima di procedere.
+        Se il veicolo ha OdL non cancellati, solleva un errore.
         
         Args:
             db: Sessione database
@@ -278,15 +286,36 @@ class VehicleService:
             
         Raises:
             NotFoundError: Se il veicolo non esiste
+            BusinessValidationError: Se esistono OdL attivi associati
         """
         # Recupera il veicolo esistente
         vehicle = await self.get_by_id(db, vehicle_id)
 
-        # Elimina
-        await db.delete(vehicle)
+        # FIX 3: Verifica che non esistano OdL con stato diverso da 'cancelled'
+        active_orders_query = (
+            select(func.count(WorkOrder.id))
+            .where(WorkOrder.vehicle_id == vehicle_id)
+            .where(WorkOrder.status != 'cancelled')
+        )
+        result = await db.execute(active_orders_query)
+        active_orders_count = result.scalar() or 0
+        
+        if active_orders_count > 0:
+            logger.warning(
+                "Tentativo di eliminare veicolo %s con %s ordini di lavoro attivi",
+                vehicle_id,
+                active_orders_count
+            )
+            raise BusinessValidationError(
+                f"Impossibile eliminare il veicolo: ha {active_orders_count} ordini di lavoro attivi. "
+                "Completare o annullare tutti gli ordini di lavoro prima di eliminare il veicolo."
+            )
+
+        # FIX 4: Converte da hard delete a soft delete
+        vehicle.is_active = False
         await db.flush()
 
-        logger.info(f"Eliminato veicolo: {vehicle_id}")
+        logger.info(f"Disattivato veicolo: {vehicle_id}")
 
     async def get_by_client(
         self,
@@ -320,6 +349,7 @@ class VehicleService:
         result = await db.execute(
             select(Vehicle)
             .where(Vehicle.client_id == client_id)
+            .where(Vehicle.is_active == True)
             .order_by(Vehicle.plate.asc())
         )
         vehicles = list(result.scalars().all())

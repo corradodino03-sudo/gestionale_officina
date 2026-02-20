@@ -62,6 +62,12 @@ from app.schemas.invoice import (
     RevenueReport,
     CreateInvoiceFromWorkOrder,
 )
+from app.schemas.intent_declaration import (
+    IntentDeclarationCreate,
+    IntentDeclarationRead,
+    IntentDeclarationUpdate,
+    IntentDeclarationList,
+)
 
 # NOTA: VehicleRead.model_rebuild() deve essere chiamato dopo l'import di ClientRead
 # per risolvere il forward reference del campo client: Optional["ClientRead"]
@@ -128,4 +134,9 @@ __all__ = [
     "InvoiceList",
     "RevenueReport",
     "CreateInvoiceFromWorkOrder",
+    # IntentDeclaration schemas
+    "IntentDeclarationCreate",
+    "IntentDeclarationRead",
+    "IntentDeclarationUpdate",
+    "IntentDeclarationList",
 ]

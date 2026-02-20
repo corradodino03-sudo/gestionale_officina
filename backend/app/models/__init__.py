@@ -32,6 +32,7 @@ from app.models.vehicle import Vehicle
 from app.models.work_order import WorkOrder, WorkOrderItem
 from app.models.part import Part, PartUsage, StockMovement
 from app.models.invoice import Invoice, InvoiceLine, Payment, PaymentAllocation
+from app.models.intent_declaration import IntentDeclaration
 
 # Placeholder per import modelli futuri
 # from app.models.vehicle import Vehicle
@@ -53,4 +54,5 @@ __all__ = [
     "InvoiceLine",
     "Payment",
     "PaymentAllocation",
+    "IntentDeclaration",
 ]

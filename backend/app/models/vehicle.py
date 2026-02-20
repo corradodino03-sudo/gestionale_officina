@@ -12,7 +12,7 @@ from sqlalchemy import ForeignKey, Index, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
-from app.models.mixins import TimestampMixin, UUIDMixin
+from app.models.mixins import TimestampMixin, UUIDMixin, SoftDeleteMixin
 
 # Import per type hinting relazioni (evita circular import)
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from app.models.work_order import WorkOrder
 
 
-class Vehicle(Base, UUIDMixin, TimestampMixin):
+class Vehicle(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """
     Modello per i veicoli associati ai clienti.
     

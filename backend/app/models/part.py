@@ -12,7 +12,7 @@ import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, Numeric, String, Text, Uuid
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, Numeric, String, Text, Uuid, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
@@ -96,6 +96,14 @@ class Part(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         default=Decimal("0"),
         doc="Prezzo di vendita",
+    )
+
+    # FIX 5: Aggiunto campo vat_rate per gestione IVA per ricambio
+    vat_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("22.00"),
+        doc="Aliquota IVA del ricambio (default 22%)",
     )
 
     stock_quantity: Mapped[int] = mapped_column(

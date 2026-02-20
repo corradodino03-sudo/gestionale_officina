@@ -190,6 +190,8 @@ class PartService:
             compatible_models=data.compatible_models,
             purchase_price=data.purchase_price or Decimal("0"),
             sale_price=data.sale_price or Decimal("0"),
+            # FIX 5: Includi vat_rate
+            vat_rate=data.vat_rate if data.vat_rate is not None else Decimal("22.00"),
             stock_quantity=0,  # Iniziale = 0
             min_stock_level=data.min_stock_level or 0,
             location=data.location,
@@ -250,6 +252,9 @@ class PartService:
             part.purchase_price = data.purchase_price
         if data.sale_price is not None:
             part.sale_price = data.sale_price
+        # FIX 5: Aggiunto aggiornamento vat_rate
+        if data.vat_rate is not None:
+            part.vat_rate = data.vat_rate
         if data.min_stock_level is not None:
             part.min_stock_level = data.min_stock_level
         if data.location is not None:
@@ -348,6 +353,16 @@ class PartService:
         else:  # ADJUSTMENT
             # Il payload quantity = NUOVO VALORE ASSOLUTO desiderato
             # La variazione è la differenza rispetto al valore attuale
+            # FIX 7: Verifica che il nuovo valore non sia negativo
+            if data.quantity < 0:
+                logger.warning(
+                    "Tentativo di impostare giacenza negativa per ricambio %s: %s",
+                    part.code,
+                    data.quantity,
+                )
+                raise BusinessValidationError(
+                    "La giacenza non può essere negativa"
+                )
             quantity_delta = data.quantity - part.stock_quantity
             part.stock_quantity = data.quantity
         
@@ -474,7 +489,13 @@ class PartService:
             )
         
         # Verifica ricambio esiste ed è attivo
-        part = await self.get_by_id(db, data.part_id)
+        part_query = select(Part).where(Part.id == data.part_id).with_for_update()
+        part_result = await db.execute(part_query)
+        part = part_result.scalar_one_or_none()
+        
+        if not part:
+            logger.warning("Ricambio non trovato: %s", data.part_id)
+            raise NotFoundError(f"Ricambio non trovato: {data.part_id}")
         
         if not part.is_active:
             logger.warning("Ricambio non attivo: %s", part.code)

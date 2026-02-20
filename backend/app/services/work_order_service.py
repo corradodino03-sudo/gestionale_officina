@@ -124,6 +124,8 @@ class WorkOrderService:
             selectinload(WorkOrder.client),
             selectinload(WorkOrder.vehicle),
             selectinload(WorkOrder.items),
+            selectinload(WorkOrder.part_usages),
+            selectinload(WorkOrder.invoice),
         ).offset(offset).limit(per_page)
         
         result = await db.execute(query)
@@ -159,6 +161,7 @@ class WorkOrderService:
         Raises:
             NotFoundError: Se l'ordine di lavoro non esiste
         """
+        logger.debug("get_by_id: Retrieving work order %s", work_order_id)
         query = (
             select(WorkOrder)
             .where(WorkOrder.id == work_order_id)
@@ -166,6 +169,8 @@ class WorkOrderService:
                 selectinload(WorkOrder.client),
                 selectinload(WorkOrder.vehicle),
                 selectinload(WorkOrder.items),
+                selectinload(WorkOrder.part_usages),
+                selectinload(WorkOrder.invoice),
             )
         )
         
@@ -176,6 +181,17 @@ class WorkOrderService:
             logger.warning("Ordine di lavoro non trovato: %s", work_order_id)
             raise NotFoundError(f"Ordine di lavoro con ID {work_order_id} non trovato")
 
+        # Debug: Log relationship statuses
+        logger.debug(
+            "get_by_id: client=%s, vehicle=%s, items=%d, "
+            "part_usages=%d, invoice=%s",
+            "loaded" if work_order.client else "None",
+            "loaded" if work_order.vehicle else "None",
+            len(work_order.items) if work_order.items else 0,
+            len(getattr(work_order, 'part_usages', []) or []),
+            "loaded" if work_order.invoice else "None"
+        )
+        
         logger.debug("Recuperato ordine di lavoro: %s", work_order_id)
         return work_order
 
@@ -257,11 +273,21 @@ class WorkOrderService:
 
         await db.flush()
         
-        # Refresh con le relazioni caricate
-        await db.refresh(
-            work_order,
-            ["client", "vehicle", "items"],
+        # Ricarica l'ordine con le relazioni caricate usando selectinload
+        # (refresh non funziona bene con lazy="noload" per collections)
+        query = (
+            select(WorkOrder)
+            .where(WorkOrder.id == work_order.id)
+            .options(
+                selectinload(WorkOrder.client),
+                selectinload(WorkOrder.vehicle),
+                selectinload(WorkOrder.items),
+                selectinload(WorkOrder.part_usages),
+                selectinload(WorkOrder.invoice),
+            )
         )
+        result = await db.execute(query)
+        work_order = result.scalar_one()
 
         logger.info("Creato ordine di lavoro: %s", work_order.id)
         return work_order

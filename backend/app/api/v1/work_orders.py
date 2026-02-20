@@ -82,6 +82,9 @@ async def get_work_orders(
     Returns:
         WorkOrderList: Lista paginata con metadati
     """
+    logger.debug("get_work_orders: page=%d, per_page=%d, status_filter=%s",
+                 page, per_page, status_filter)
+    
     work_orders, total = await work_order_service.get_all(
         db=db,
         status_filter=status_filter,
@@ -91,6 +94,17 @@ async def get_work_orders(
         per_page=per_page,
         search=search,
     )
+    
+    logger.debug("get_work_orders: Retrieved %d work orders out of %d total",
+                 len(work_orders), total)
+
+    # Debug: Log first work order structure if exists
+    if work_orders:
+        logger.debug("get_work_orders: First work order: id=%s, client=%s, vehicle=%s, items=%d",
+                     work_orders[0].id,
+                     work_orders[0].client_id if work_orders[0].client else "None",
+                     work_orders[0].vehicle_id if work_orders[0].vehicle else "None",
+                     len(work_orders[0].items) if work_orders[0].items else 0)
 
     return WorkOrderList(
         items=[WorkOrderRead.model_validate(wo) for wo in work_orders],
@@ -156,9 +170,18 @@ async def create_work_order(
         NotFoundError: Se il cliente o il veicolo non esistono
         ValidationError: Se il veicolo non appartiene al cliente
     """
-    work_order = await work_order_service.create(db, data)
-    await db.commit()
-    return WorkOrderRead.model_validate(work_order)
+    logger.info("create_work_order: Creating work order for client=%s, vehicle=%s",
+                data.client_id, data.vehicle_id)
+    logger.debug("create_work_order: Input data=%s", data.model_dump_json())
+    
+    try:
+        work_order = await work_order_service.create(db, data)
+        await db.commit()
+        logger.info("create_work_order: Work order created successfully, id=%s", work_order.id)
+        return WorkOrderRead.model_validate(work_order)
+    except Exception as e:
+        logger.error("create_work_order: Error creating work order: %s", str(e), exc_info=True)
+        raise
 
 
 @router.put(

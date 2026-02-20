@@ -24,6 +24,7 @@ from app.schemas.part import (
     MovementType,
     PartCreate,
     PartUpdate,
+    PartUsageCreate,
     StockMovementCreate,
 )
 

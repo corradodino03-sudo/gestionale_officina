@@ -32,6 +32,43 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------
+# Lifespan Handler
+# ------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> None:
+    """
+    Gestisce il ciclo di vita dell'applicazione.
+
+    - Startup: inizializza la connessione al database
+    - Shutdown: chiude le connessioni database
+    """
+    # Startup
+    logger.info(f"Avvio {settings.app_name} v{settings.app_version}")
+    await init_db()
+    logger.info("Applicazione avviata con successo")
+
+    yield
+
+    # Shutdown
+    logger.info("Arresto applicazione in corso...")
+    await close_db()
+    logger.info("Applicazione arrestata")
+
+
+# ------------------------------------------------------------
+# FastAPI Application
+# ------------------------------------------------------------
+app = FastAPI(
+    title=settings.app_name,
+    description="Gestionale per officina meccanica - Backend API",
+    version=settings.app_version,
+    lifespan=lifespan,
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
+)
+
+
+# ------------------------------------------------------------
 # Exception Handlers
 # ------------------------------------------------------------
 @app.exception_handler(NotFoundError)
@@ -101,43 +138,6 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
         status_code=500,
         content={"detail": "Errore interno del server"},
     )
-
-
-# ------------------------------------------------------------
-# Lifespan Handler
-# ------------------------------------------------------------
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> None:
-    """
-    Gestisce il ciclo di vita dell'applicazione.
-
-    - Startup: inizializza la connessione al database
-    - Shutdown: chiude le connessioni database
-    """
-    # Startup
-    logger.info(f"Avvio {settings.app_name} v{settings.app_version}")
-    await init_db()
-    logger.info("Applicazione avviata con successo")
-
-    yield
-
-    # Shutdown
-    logger.info("Arresto applicazione in corso...")
-    await close_db()
-    logger.info("Applicazione arrestata")
-
-
-# ------------------------------------------------------------
-# FastAPI Application
-# ------------------------------------------------------------
-app = FastAPI(
-    title=settings.app_name,
-    description="Gestionale per officina meccanica - Backend API",
-    version=settings.app_version,
-    lifespan=lifespan,
-    docs_url="/docs" if settings.debug else None,
-    redoc_url="/redoc" if settings.debug else None,
-)
 
 
 # ------------------------------------------------------------

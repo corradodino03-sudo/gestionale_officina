@@ -146,7 +146,10 @@ class InvoiceService:
         effective_vat_rate = data.vat_rate
         if effective_vat_rate is None:
             # Usa il default del cliente se disponibile, altrimenti 22%
-            effective_vat_rate = Decimal("22.00")
+            if client.default_vat_rate is not None:
+                effective_vat_rate = Decimal(str(client.default_vat_rate))
+            else:
+                effective_vat_rate = Decimal("22.00")
         
         # FEAT 4: Determina il regime IVA in base a vat_regime e vat_exemption
         # La logica ha precedenza su default_vat_rate quando il regime lo impone
@@ -178,7 +181,11 @@ class InvoiceService:
         total_vat = Decimal("0")
         
         # FEAT 3: Determina lo sconto predefinito del cliente
-        default_discount_percent = float(client.default_discount_percent) if client.default_discount_percent else 0.0
+        default_discount_percent = (
+            Decimal(str(client.default_discount_percent))
+            if client.default_discount_percent is not None
+            else Decimal("0")
+        )
         
         for item in work_order.items:
             item_subtotal = item.quantity * item.unit_price

@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------
     # Configurazione Applicazione
     # ------------------------------------------------------------
+
     app_name: str = Field(
         default="Garage Manager",
         description="Nome applicazione",

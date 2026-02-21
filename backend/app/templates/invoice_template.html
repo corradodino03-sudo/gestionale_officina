@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Fattura {{ invoice.invoice_number }}</title>
+</head>
+<body>
+
+    <!-- ═══════════════════════════════════════════════
+         HEADER: Officina + Numero Fattura
+    ═══════════════════════════════════════════════ -->
+    <div class="header">
+        <div class="garage-block">
+            <div class="garage-name">{{ garage_name }}</div>
+            <div class="garage-details">
+                <span>{{ garage_address }}</span><br>
+                <span>P.IVA {{ garage_vat }}</span>
+                {% if garage_phone %} &nbsp;·&nbsp; <span>Tel. {{ garage_phone }}</span>{% endif %}
+                {% if garage_email %} &nbsp;·&nbsp; <span>{{ garage_email }}</span>{% endif %}
+            </div>
+        </div>
+        <div class="invoice-badge">
+            <div class="invoice-label">FATTURA</div>
+            <div class="invoice-number">{{ invoice.invoice_number }}</div>
+            <div class="invoice-date">{{ invoice.invoice_date.strftime("%d/%m/%Y") }}</div>
+        </div>
+    </div>
+
+    <div class="header-rule"></div>
+
+    <!-- ═══════════════════════════════════════════════
+         CLIENTE + META
+    ═══════════════════════════════════════════════ -->
+    <div class="meta-row">
+        <div class="client-block">
+            <div class="block-label">DESTINATARIO</div>
+            <div class="client-name">{{ billing_name }}</div>
+            {% if billing_address %}<div class="client-detail">{{ billing_address }}</div>{% endif %}
+            {% if billing_tax_id %}<div class="client-detail">C.F. / P.IVA: <strong>{{ billing_tax_id }}</strong></div>{% endif %}
+        </div>
+        <div class="payment-block">
+            <div class="block-label">PAGAMENTO</div>
+            {% if invoice.due_date %}
+            <div class="payment-row">
+                <span class="payment-key">Scadenza</span>
+                <span class="payment-val">{{ invoice.due_date.strftime("%d/%m/%Y") }}</span>
+            </div>
+            {% endif %}
+            {% if invoice.payment_iban %}
+            <div class="payment-row">
+                <span class="payment-key">IBAN</span>
+                <span class="payment-val iban">{{ invoice.payment_iban }}</span>
+            </div>
+            {% endif %}
+            {% if invoice.payment_reference %}
+            <div class="payment-row">
+                <span class="payment-key">Causale</span>
+                <span class="payment-val">{{ invoice.payment_reference }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if invoice.claim_number %}
+    <div class="claim-banner">
+        <span class="claim-icon">⚠</span>
+        Pratica sinistro n. <strong>{{ invoice.claim_number }}</strong>
+    </div>
+    {% endif %}
+
+    {% if vehicle %}
+    <div class="vehicle-block">
+        <div class="block-label">VEICOLO</div>
+        <div class="vehicle-row">
+            <span class="vehicle-main">
+                {{ vehicle.brand }} {{ vehicle.model }}
+            </span>
+            <span class="vehicle-plate">{{ vehicle.plate }}</span>
+            {% if vehicle.year %}
+                <span class="vehicle-meta">&nbsp;·&nbsp; {{ vehicle.year }}</span>
+            {% endif %}
+            {% if vehicle.color %}
+                <span class="vehicle-meta">&nbsp;·&nbsp; {{ vehicle.color }}</span>
+            {% endif %}
+            {% if work_order and work_order.km_in %}
+                <span class="vehicle-meta">
+                    &nbsp;·&nbsp; km ingresso: {{ work_order.km_in | int }}
+                </span>
+            {% endif %}
+            {% if work_order and work_order.km_out %}
+                <span class="vehicle-meta">
+                    &nbsp;·&nbsp; km uscita: {{ work_order.km_out | int }}
+                </span>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ═══════════════════════════════════════════════
+         RIGHE FATTURA
+    ═══════════════════════════════════════════════ -->
+    <table class="lines-table">
+        <thead>
+            <tr>
+                <th class="col-num">N°</th>
+                <th class="col-desc">Descrizione</th>
+                <th class="col-qty text-right">Qtà</th>
+                <th class="col-price text-right">Prezzo unit.</th>
+                <th class="col-disc text-right">Sconto</th>
+                <th class="col-sub text-right">Imponibile</th>
+                <th class="col-vat text-right">IVA</th>
+                <th class="col-total text-right">Totale</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for line in invoice.lines %}
+            <tr class="{{ 'row-even' if loop.index is even else 'row-odd' }}">
+                <td class="col-num text-center text-muted">{{ loop.index }}</td>
+                <td class="col-desc">
+                    <span class="line-type-badge type-{{ line.line_type }}">{{ line.line_type | upper }}</span>
+                    {{ line.description }}
+                </td>
+                <td class="col-qty text-right">{{ "%.2f"|format(line.quantity) }}</td>
+                <td class="col-price text-right">{{ "%.2f"|format(line.unit_price) }} €</td>
+                <td class="col-disc text-right text-muted">
+                    {% if line.discount_percent and line.discount_percent > 0 %}
+                        {{ "%.0f"|format(line.discount_percent) }}%
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td class="col-sub text-right">{{ "%.2f"|format(line.subtotal) }} €</td>
+                <td class="col-vat text-right text-muted">{{ "%.0f"|format(line.vat_rate) }}%</td>
+                <td class="col-total text-right"><strong>{{ "%.2f"|format(line.total) }} €</strong></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- ═══════════════════════════════════════════════
+         RIEPILOGO IVA + TOTALI
+    ═══════════════════════════════════════════════ -->
+    <div class="summary-row">
+
+        <div class="vat-summary">
+            <div class="block-label">RIEPILOGO IVA</div>
+            <table class="vat-table">
+                <thead>
+                    <tr>
+                        <th>Aliquota</th>
+                        <th class="text-right">Imponibile</th>
+                        <th class="text-right">Imposta</th>
+                        <th>Natura</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for vat in vat_summary %}
+                    <tr>
+                        <td>{{ "%.0f"|format(vat.rate) }}%</td>
+                        <td class="text-right">{{ "%.2f"|format(vat.subtotal) }} €</td>
+                        <td class="text-right">{{ "%.2f"|format(vat.vat_amount) }} €</td>
+                        <td class="text-muted">{{ vat.nature if vat.rate == 0 else "" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="totals-block">
+            <div class="totals-inner">
+                <div class="total-line">
+                    <span>Imponibile</span>
+                    <span>{{ "%.2f"|format(invoice.subtotal) }} €</span>
+                </div>
+                <div class="total-line">
+                    <span>IVA {% if not is_vat_exempt %}({{ "%.0f"|format(invoice.vat_rate) }}%){% endif %}</span>
+                    <span>{{ "%.2f"|format(invoice.vat_amount) }} €</span>
+                </div>
+                {% if has_stamp_duty %}
+                <div class="total-line">
+                    <span>Marca da bollo</span>
+                    <span>{{ "%.2f"|format(invoice.stamp_duty_amount) }} €</span>
+                </div>
+                {% endif %}
+                <div class="total-rule"></div>
+                <div class="total-line total-final">
+                    <span>TOTALE</span>
+                    <span>{{ "%.2f"|format(invoice.total) }} €</span>
+                </div>
+                {% if is_split_payment %}
+                <div class="split-note">
+                    Di cui a carico del cliente: <strong>{{ "%.2f"|format(invoice.amount_due_from_client) }} €</strong><br>
+                    <small>IVA versata all'Erario — Split Payment art. 17-ter DPR 633/72</small>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ═══════════════════════════════════════════════
+         NOTE LEGALI
+    ═══════════════════════════════════════════════ -->
+    {% if invoice.customer_notes %}
+    <div class="legal-notes">
+        <div class="block-label">NOTE</div>
+        <p>{{ invoice.customer_notes | replace('\n', '<br>') | safe }}</p>
+    </div>
+    {% endif %}
+
+    <!-- ═══════════════════════════════════════════════
+         FOOTER
+    ═══════════════════════════════════════════════ -->
+    <div class="footer">
+        <span>{{ garage_name }} &nbsp;·&nbsp; P.IVA {{ garage_vat }}</span>
+        <span>Documento generato il {{ oggi }}</span>
+    </div>
+
+</body>
+</html>

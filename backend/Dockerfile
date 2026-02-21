@@ -13,6 +13,7 @@ ENV PYTHONUNBUFFERED=1 \
 # Installa dipendenze di sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    libpango-1.0-0 libpangoft2-1.0-0 libjpeg-dev libopenjp2-7-dev libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Crea directory lavoro

@@ -777,7 +777,7 @@ class InvoiceService:
             select(Invoice)
             .where(Invoice.id == invoice_id)
             .options(
-                selectinload(Invoice.work_order),
+                selectinload(Invoice.work_order).selectinload(WorkOrder.vehicle),
                 selectinload(Invoice.client),
                 selectinload(Invoice.lines),
                 selectinload(Invoice.payment_allocations),

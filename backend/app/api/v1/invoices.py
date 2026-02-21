@@ -11,7 +11,7 @@ import uuid
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -33,6 +33,7 @@ from app.schemas.invoice import (
 )
 from app.services.invoice_service import InvoiceService
 from app.services.credit_note_service import CreditNoteService
+from app.services.pdf_service import PdfService
 
 # Logger per questo modulo
 logger = logging.getLogger(__name__)
@@ -169,6 +170,39 @@ async def get_invoice_by_number(
     return await invoice_service.get_by_invoice_number(
         db=db,
         invoice_number=invoice_number,
+    )
+
+
+@router.get(
+    "/{invoice_id}/pdf",
+    summary="Scarica PDF fattura",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "PDF della fattura",
+        }
+    },
+)
+async def download_invoice_pdf(
+    invoice_id: uuid.UUID = Path(..., description="UUID della fattura"),
+    db: AsyncSession = Depends(get_db),
+    invoice_service: InvoiceService = Depends(),
+    pdf_service: PdfService = Depends(),
+) -> Response:
+    # Il router carica la fattura con tutte le relazioni
+    invoice = await invoice_service.get_by_id(db, invoice_id)
+    
+    pdf_bytes = pdf_service.generate_invoice_pdf(invoice)
+    
+    filename = f"fattura_{invoice.invoice_number.replace('/', '-')}.pdf"
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
     )
 
 

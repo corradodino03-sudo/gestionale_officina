@@ -312,6 +312,7 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         "Invoice",
         back_populates="client",
         lazy="noload",
+        foreign_keys="Invoice.client_id",
         doc="Fatture associate al cliente",
     )
 

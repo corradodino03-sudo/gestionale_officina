@@ -501,7 +501,7 @@ class PartService:
             )
         
         # Verifica ricambio esiste ed è attivo
-        part_query = select(Part).where(Part.id == data.part_id).with_for_update()
+        part_query = select(Part).where(Part.id == data.part_id).with_for_update(of=(Part,))
         part_result = await db.execute(part_query)
         part = part_result.scalar_one_or_none()
         

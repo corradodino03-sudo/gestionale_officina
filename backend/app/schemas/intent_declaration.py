@@ -4,7 +4,7 @@ Progetto: Garage Manager (Gestionale Officina)
 """
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -63,6 +63,11 @@ class IntentDeclarationBase(BaseModel):
 
 class IntentDeclarationCreate(IntentDeclarationBase):
     """Schema per la creazione di una dichiarazione di intento."""
+    
+    client_id: uuid.UUID = Field(
+        ...,
+        description="UUID del cliente a cui associare la dichiarazione",
+    )
     
     is_active: bool = Field(
         default=True,
@@ -138,12 +143,12 @@ class IntentDeclarationRead(IntentDeclarationBase):
         description="Se la dichiarazione è attiva",
     )
     
-    created_at: date = Field(
+    created_at: datetime = Field(
         ...,
         description="Data/ora creazione",
     )
     
-    updated_at: date = Field(
+    updated_at: datetime = Field(
         ...,
         description="Data/ora ultimo aggiornamento",
     )

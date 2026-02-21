@@ -106,10 +106,13 @@ class InvoiceService:
             ConflictError: errore di integrità (numero fattura duplicato)
         """
         # Step 1: Verifica esistenza work_order
+        # FIX: Added of=(WorkOrder,) to specify only WorkOrder table should be locked
+        # PostgreSQL doesn't support FOR UPDATE on nullable side of outer joins
+        # The WorkOrder model has lazy="joined" relationships that cause LEFT OUTER JOINs
         stmt = (
             select(WorkOrder)
             .where(WorkOrder.id == work_order_id)
-            .with_for_update()
+            .with_for_update(of=(WorkOrder,))  # Only lock WorkOrder, not joined tables
             .options(
                 selectinload(WorkOrder.client),
                 selectinload(WorkOrder.items),
@@ -117,6 +120,7 @@ class InvoiceService:
                 selectinload(WorkOrder.invoice),
             )
         )
+        logger.debug("Query with_for_update(of=(WorkOrder,)) for work_order_id=%s", work_order_id)
         result = await db.execute(stmt)
         work_order = result.scalar_one_or_none()
         
@@ -159,11 +163,12 @@ class InvoiceService:
             billing_client = billing_client_res
             
             # Popola i dati denormalizzati
-            bill_to_name = f"{billing_client.first_name} {billing_client.last_name}".strip()
-            if billing_client.company_name:
-                bill_to_name = billing_client.company_name
+            if billing_client.is_company:
+                bill_to_name = billing_client.name
+            else:
+                bill_to_name = f"{billing_client.name} {billing_client.surname or ''}".strip()
                 
-            bill_to_tax_id = billing_client.vat_number or billing_client.tax_code
+            bill_to_tax_id = billing_client.tax_id
             
             bill_to_address = billing_client.effective_billing_address if hasattr(billing_client, 'effective_billing_address') else (
                 f"{billing_client.address}, {billing_client.city} ({billing_client.province}) {billing_client.zip_code}"
@@ -198,13 +203,11 @@ class InvoiceService:
             else:
                 bill_to_address = raw_address
             
-            bill_to_name = (
-                billing_client.company_name
-                or f"{billing_client.first_name} {billing_client.last_name}".strip()
-            )
-            bill_to_tax_id = (
-                billing_client.vat_number or billing_client.tax_code
-            )
+            if billing_client.is_company:
+                bill_to_name = billing_client.name
+            else:
+                bill_to_name = f"{billing_client.name} {billing_client.surname or ''}".strip()
+            bill_to_tax_id = billing_client.tax_id
         
         # Step 5: Genera numero fattura
         invoice_date = data.invoice_date or date.today()
@@ -415,12 +418,7 @@ class InvoiceService:
             stamp_duty_amount = settings.stamp_duty_amount
             total += stamp_duty_amount
         
-        # SVC-3: Split payment calculation
-        # FEAT 3 (P0-Fix Round 4): Split payment calculation
-        # PA: il cliente paga imponibile + bollo, l'IVA va all'Erario
-        amount_due_from_client = total  # default: il cliente paga tutto
-        if getattr(billing_client, 'split_payment', False):
-            amount_due_from_client = subtotal + stamp_duty_amount
+        # NOTA: amount_due_from_client è calcolato come computed field nello schema InvoiceRead
         
         # FEAT 7: Controllo fido commerciale
         credit_limit_warning = None
@@ -511,7 +509,6 @@ class InvoiceService:
             vat_exemption=is_vat_exempt,
             vat_exemption_code=vat_exemption_code,
             split_payment=getattr(billing_client, 'split_payment', False),
-            amount_due_from_client=amount_due_from_client,
             notes=final_internal_notes,
             customer_notes=final_customer_notes,
             stamp_duty_applied=stamp_duty_applied,

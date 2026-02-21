@@ -243,6 +243,7 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
         "Client",
         back_populates="invoices",
         lazy="selectin",
+        foreign_keys="[Invoice.client_id]",
         doc="Cliente associato",
     )
 

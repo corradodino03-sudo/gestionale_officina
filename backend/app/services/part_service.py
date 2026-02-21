@@ -15,10 +15,11 @@ from decimal import Decimal
 from typing import Optional, Tuple
 
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BusinessValidationError, DuplicateError, NotFoundError
-from app.models.part import Part, PartUsage, StockMovement
+from app.models.part import Part, PartCategory, PartUsage, StockMovement
 from app.models.work_order import WorkOrder
 from app.schemas.part import (
     MovementType,
@@ -71,7 +72,7 @@ class PartService:
         Returns:
             Tuple (lista ricambi, totale)
         """
-        query = select(Part)
+        query = select(Part).options(selectinload(Part.category).selectinload(PartCategory.children))
         count_query = select(func.count(Part.id))
         
         # Filtro ricerca
@@ -130,7 +131,7 @@ class PartService:
         Raises:
             NotFoundError: Se il ricambio non esiste
         """
-        query = select(Part).where(Part.id == part_id)
+        query = select(Part).where(Part.id == part_id).options(selectinload(Part.category).selectinload(PartCategory.children)).options(selectinload(Part.category).selectinload(PartCategory.children))
         result = await db.execute(query)
         part = result.scalar_one_or_none()
         
@@ -154,7 +155,7 @@ class PartService:
         Raises:
             NotFoundError: Se il ricambio non esiste
         """
-        query = select(Part).where(func.upper(Part.code) == code.upper())
+        query = select(Part).where(func.upper(Part.code) == code.upper()).options(selectinload(Part.category).selectinload(PartCategory.children)).options(selectinload(Part.category).selectinload(PartCategory.children))
         result = await db.execute(query)
         part = result.scalar_one_or_none()
         

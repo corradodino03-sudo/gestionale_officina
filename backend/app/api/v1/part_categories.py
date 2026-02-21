@@ -1,11 +1,11 @@
 import logging
 import uuid
-from typing import List
+from typing import Optional, List, Set
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import noload, selectinload
 
 from app.core.database import get_db
 from app.core.exceptions import BusinessValidationError, NotFoundError
@@ -20,19 +20,51 @@ router = APIRouter(
 )
 
 
+def build_category_tree(all_categories: list[PartCategory]) -> list[PartCategory]:
+    """
+    Build a tree structure from a flat list of categories.
+    Returns only root categories (parent_id is None) with children populated.
+    
+    This ensures all children are loaded within the session context,
+    preventing DetachedInstanceError during serialization.
+    """
+    # Create a mapping of parent_id -> list of children
+    children_by_parent: dict[Optional[uuid.UUID], list[PartCategory]] = {}
+    
+    for cat in all_categories:
+        parent_key = cat.parent_id
+        if parent_key not in children_by_parent:
+            children_by_parent[parent_key] = []
+        children_by_parent[parent_key].append(cat)
+    
+    # Assign children to each category using the internal attribute
+    # to avoid triggering SQLAlchemy's lazy loading mechanism
+    for cat in all_categories:
+        # Use _sa_instance_state to directly set the attribute without triggering loads
+        object.__setattr__(cat, 'children', children_by_parent.get(cat.id, []))
+    
+    # Return only root categories (parent_id is None)
+    return children_by_parent.get(None, [])
+
+
 @router.get("/", response_model=List[PartCategoryRead])
 async def get_all_categories(db: AsyncSession = Depends(get_db)):
     """Recupera tutte le categorie (con subcategorie annidate)."""
-    # Fetch root categories (without parent). selectinload will fetch nested children natively because of lazy="selectin" on children relationship.
+    # Fetch ALL categories in one query with noload to prevent lazy loading
+    # We'll build the tree manually in Python
     query = (
         select(PartCategory)
-        .where(PartCategory.parent_id == None)
+        .options(noload(PartCategory.children), noload(PartCategory.parent))
         .where(PartCategory.is_active == True)
         .order_by(PartCategory.name)
     )
     result = await db.execute(query)
-    categories = result.scalars().all()
-    return categories
+    all_categories = list(result.scalars().all())
+    
+    # Build the tree structure in Python
+    root_categories = build_category_tree(all_categories)
+    
+    return root_categories
 
 
 @router.get("/{category_id}", response_model=PartCategoryRead)

@@ -5,11 +5,11 @@ Progetto: Garage Manager (Gestionale Officina)
 Definisce le impostazioni dell'applicazione caricate da variabili d'ambiente.
 """
 
-from __future__ import annotations
 
+from __future__ import annotations
 import logging
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Optional
 from decimal import Decimal
 
 from pydantic import Field, field_validator, model_validator
@@ -129,7 +129,7 @@ class Settings(BaseSettings):
         description="Codice SDI dell'officina",
     )
 
-    invoice_logo_path: str | None = Field(
+    invoice_logo_path: Optional[str] = Field(
         default=None,
         description="Path relativo al logo (es. ./static/logo.png)",
     )
@@ -139,12 +139,12 @@ class Settings(BaseSettings):
         description="Partita IVA officina (formato: IT + 11 cifre, es. IT01234567890)",
     )
 
-    invoice_rea_number: str | None = Field(
+    invoice_rea_number: Optional[str] = Field(
         default=None,
         description="Numero REA (es. MI-1234567)",
     )
 
-    invoice_capital: str | None = Field(
+    invoice_capital: Optional[str] = Field(
         default=None,
         description="Capitale sociale (per S.r.l.)",
     )

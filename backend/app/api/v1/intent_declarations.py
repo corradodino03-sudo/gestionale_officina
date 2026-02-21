@@ -177,6 +177,7 @@ async def get_intent_declaration(
         NotFoundError: Se la dichiarazione non esiste
     """
     from sqlalchemy import select
+    from app.models.intent_declaration import IntentDeclaration
     
     stmt = (
         select(IntentDeclaration)
@@ -432,4 +433,54 @@ async def get_intent_declarations_by_client(
         page=1,
         per_page=total,
         total_pages=1,
+    )
+
+
+# -------------------------------------------------------------------
+# Endpoints Supplementari
+# -------------------------------------------------------------------
+
+@router.patch(
+    "/{declaration_id}",
+    name="intent_declaration_aggiorna_parziale",
+    summary="Aggiorna dichiarazione di intento (parziale)",
+    description="Aggiorna parzialmente i dati di una dichiarazione di intento (Alias di PUT).",
+    response_model=IntentDeclarationRead,
+    status_code=status.HTTP_200_OK,
+)
+async def patch_intent_declaration(
+    declaration_id: uuid.UUID,
+    declaration_data: IntentDeclarationUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> IntentDeclarationRead:
+    """
+    Alias di PUT per l'aggiornamento parziale.
+    Internamente chiama la stessa logica di update_intent_declaration.
+    """
+    return await update_intent_declaration(
+        declaration_id=declaration_id,
+        declaration_data=declaration_data,
+        db=db
+    )
+
+
+@router.put(
+    "/{declaration_id}/deactivate",
+    name="intent_declaration_disattiva",
+    summary="Disattiva dichiarazione di intento",
+    description="Imposta una dichiarazione di intento come inattiva.",
+    response_model=IntentDeclarationRead,
+    status_code=status.HTTP_200_OK,
+)
+async def deactivate_intent_declaration(
+    declaration_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> IntentDeclarationRead:
+    """
+    Scorciatoia per disattivare (is_active=False) una dichiarazione di intento.
+    """
+    return await update_intent_declaration(
+        declaration_id=declaration_id,
+        declaration_data=IntentDeclarationUpdate(is_active=False),
+        db=db
     )

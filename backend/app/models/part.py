@@ -8,8 +8,8 @@ Contiene:
 - StockMovement: Movimenti di magazzino
 """
 
-from __future__ import annotations
 
+from __future__ import annotations
 import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING, List, Optional
@@ -33,8 +33,8 @@ class PartCategory(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "part_categories"
 
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parent_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid, ForeignKey("part_categories.id", ondelete="SET NULL"), nullable=True, index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -85,7 +85,7 @@ class Part(Base, UUIDMixin, TimestampMixin):
     # ------------------------------------------------------------
     # Colonne Relazione Categoria
     # ------------------------------------------------------------
-    category_id: Mapped[uuid.UUID | None] = mapped_column(
+    category_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid,
         ForeignKey("part_categories.id", ondelete="SET NULL"),
         nullable=True,
@@ -110,14 +110,14 @@ class Part(Base, UUIDMixin, TimestampMixin):
         doc="Descrizione del ricambio",
     )
 
-    brand: Mapped[str | None] = mapped_column(
+    brand: Mapped[Optional[str]] = mapped_column(
         String(100),
         nullable=True,
         index=True,
         doc="Marca/fornitore del ricambio",
     )
 
-    compatible_models: Mapped[str | None] = mapped_column(
+    compatible_models: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         doc="Modelli di veicolo compatibili (testo libero)",
@@ -159,7 +159,7 @@ class Part(Base, UUIDMixin, TimestampMixin):
         doc="Livello minimo giacenza per alert",
     )
 
-    location: Mapped[str | None] = mapped_column(
+    location: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
         doc="Posizione fisica in magazzino",
@@ -380,13 +380,13 @@ class StockMovement(Base, UUIDMixin, TimestampMixin):
         doc="Quantità del movimento (positiva o negativa)",
     )
 
-    reference: Mapped[str | None] = mapped_column(
+    reference: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
         doc="Riferimento (es. numero ordine, nota)",
     )
 
-    notes: Mapped[str | None] = mapped_column(
+    notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         doc="Note aggiuntive",

@@ -247,3 +247,28 @@ async def delete_vehicle(
         vehicle_id=vehicle_id,
     )
     await db.commit()
+
+
+@router.patch(
+    "/{vehicle_id}",
+    name="veicolo_aggiorna_parziale",
+    summary="Aggiorna veicolo (parziale)",
+    description="Aggiorna parzialmente i dati di un veicolo esistente (Alias di PUT).",
+    response_model=VehicleRead,
+    status_code=status.HTTP_200_OK,
+)
+async def patch_vehicle(
+    vehicle_id: uuid.UUID,
+    vehicle_data: VehicleUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> VehicleRead:
+    """
+    Alias di PUT per l'aggiornamento parziale di un veicolo esistente.
+    """
+    vehicle = await vehicle_service.update(
+        db=db,
+        vehicle_id=vehicle_id,
+        vehicle_data=vehicle_data,
+    )
+    await db.commit()
+    return VehicleRead.model_validate(vehicle)

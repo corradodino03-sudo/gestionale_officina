@@ -235,3 +235,29 @@ async def delete_client(
     """
     await service.delete(db=db, client_id=client_id, hard_delete=hard_delete)
     await db.commit()
+
+
+@router.patch(
+    "/{client_id}",
+    name="cliente_aggiorna_parziale",
+    summary="Aggiorna cliente (parziale)",
+    description="Aggiorna parzialmente i dati di un cliente esistente (Alias di PUT).",
+    response_model=ClientRead,
+    status_code=status.HTTP_200_OK,
+)
+async def patch_client(
+    client_id: uuid.UUID,
+    client_data: ClientUpdate,
+    db: AsyncSession = Depends(get_db),
+    service: ClientService = Depends(get_client_service),
+) -> ClientRead:
+    """
+    Alias di PUT per l'aggiornamento parziale di un cliente esistente.
+    """
+    client = await service.update(
+        db=db,
+        client_id=client_id,
+        client_data=client_data,
+    )
+    await db.commit()
+    return ClientRead.model_validate(client)

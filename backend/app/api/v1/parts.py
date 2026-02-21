@@ -342,3 +342,28 @@ async def get_movements(
         page=page,
         per_page=per_page,
     )
+
+
+# ------------------------------------------------------------
+# Endpoint: Aggiornamento Parziale Ricambio (Alias)
+# ------------------------------------------------------------
+
+@router.patch(
+    "/{part_id}",
+    name="part_update_partial",
+    summary="Aggiorna ricambio (parziale)",
+    description="Aggiorna parzialmente i dati di un ricambio esistente (Alias di PUT).",
+    response_model=PartRead,
+    status_code=status.HTTP_200_OK,
+)
+async def patch_part(
+    part_id: uuid.UUID,
+    data: PartUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> PartRead:
+    """
+    Alias di PUT per l'aggiornamento parziale di un ricambio esistente.
+    """
+    part = await part_service.update(db, part_id, data)
+    await db.commit()
+    return PartRead.model_validate(part)

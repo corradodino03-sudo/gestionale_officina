@@ -256,7 +256,7 @@ async def delete_invoice(
 # -------------------------------------------------------------------
 
 @router.post(
-    "/{invoice_id}/credit-note",
+    "/{invoice_id}/credit-notes",
     name="crea_nota_di_credito",
     summary="Crea nota di credito (storno totale)",
     description="Crea una nota di credito a storno totale di una fattura.",
@@ -272,7 +272,7 @@ async def create_credit_note(
     return await credit_note_service.create_from_invoice(db=db, invoice_id=invoice_id, reason=reason)
 
 @router.post(
-    "/{invoice_id}/credit-note/partial",
+    "/{invoice_id}/credit-notes/partial",
     name="crea_nota_di_credito_parziale",
     summary="Crea nota di credito (storno parziale)",
     description="Crea una nota di credito stornando solo parzialmente una fattura.",
@@ -288,7 +288,7 @@ async def create_partial_credit_note(
     return await credit_note_service.create_partial(db=db, invoice_id=invoice_id, request=request)
 
 @router.get(
-    "/{invoice_id}/credit-note",
+    "/{invoice_id}/credit-notes",
     name="leggi_nota_di_credito_fattura",
     summary="Leggi nota di credito da fattura",
     description="Restituisce le note di credito relative ad una fattura.",
@@ -558,4 +558,39 @@ async def get_revenue_report(
         db=db,
         from_date=from_date,
         to_date=to_date,
+    )
+
+
+# -------------------------------------------------------------------
+# Endpoint: Aggiornamento Parziale Fattura (Alias)
+# -------------------------------------------------------------------
+
+@router.patch(
+    "/{invoice_id}",
+    name="aggiorna_fattura_parziale",
+    summary="Aggiorna fattura (parziale)",
+    description="Aggiorna i dati parziali di una fattura. Blocca se è già emessa/pagata.",
+    response_model=InvoiceRead,
+    status_code=status.HTTP_200_OK,
+)
+async def patch_invoice(
+    invoice_id: uuid.UUID = Path(..., description="UUID della fattura"),
+    data: InvoiceUpdate = ...,
+    db: AsyncSession = Depends(get_db),
+) -> InvoiceRead:
+    """
+    Alias di PUT per l'aggiornamento parziale di una fattura.
+    Blocca la modifica se lo stato della fattura non lo permette.
+    """
+    # Verifica dello stato attuale prima di aggiornare
+    invoice = await invoice_service.get_by_id(db=db, invoice_id=invoice_id)
+    if invoice.status in ["issued", "paid", "credited"]:
+        raise BusinessValidationError(
+            f"Impossibile modificare una fattura in stato '{invoice.status}'."
+        )
+        
+    return await invoice_service.update(
+        db=db,
+        invoice_id=invoice_id,
+        data=data,
     )

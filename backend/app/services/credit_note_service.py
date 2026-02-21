@@ -54,11 +54,14 @@ class CreditNoteService:
             # Crea riga con segno negativo (sull'unit_price)
             # In questo modo subtotal e total della riga saranno negativi
             cn_line = CreditNoteLine(
+                line_type=line.line_type,
                 description=line.description,
                 quantity=line.quantity,
                 unit_price=-line.unit_price,  # Segno negativo
                 vat_rate=line.vat_rate,
                 discount_percent=line.discount_percent,
+                discount_amount=line.discount_amount,
+                line_number=line.line_number,
             )
             cn_lines.append(cn_line)
             
@@ -144,11 +147,14 @@ class CreditNoteService:
                 )
                 
             cn_line = CreditNoteLine(
+                line_type=orig_line.line_type,
                 description=orig_line.description,
                 quantity=req_line.quantity,
                 unit_price=-orig_line.unit_price,  # Segno negativo
                 vat_rate=orig_line.vat_rate,
                 discount_percent=orig_line.discount_percent,
+                discount_amount=orig_line.discount_amount,
+                line_number=orig_line.line_number,
             )
             cn_lines.append(cn_line)
             

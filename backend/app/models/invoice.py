@@ -8,12 +8,12 @@ Contiene:
 - Payment: Pagamenti registrati sulla fattura
 """
 
-from __future__ import annotations
 
+from __future__ import annotations
 import uuid
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
-from typing import TYPE_CHECKING, List
+from typing import Optional, TYPE_CHECKING, List
 
 from sqlalchemy import (
     CheckConstraint,
@@ -97,16 +97,16 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
     )
 
     # FEAT 3: Fattura a terzi
-    bill_to_client_id: Mapped[uuid.UUID | None] = mapped_column(
+    bill_to_client_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid,
         ForeignKey("clients.id", ondelete="SET NULL"),
         nullable=True,
         doc="UUID del cliente a cui è intestata la fattura (se diverso dal proprietario)",
     )
-    bill_to_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    bill_to_tax_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    bill_to_address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    claim_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    bill_to_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    bill_to_tax_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    bill_to_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    claim_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
 
     # ------------------------------------------------------------
@@ -179,13 +179,13 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
     # ------------------------------------------------------------
     # Colonne Pagamento (FEAT 2)
     # ------------------------------------------------------------
-    payment_iban: Mapped[str | None] = mapped_column(
+    payment_iban: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
         doc="IBAN per pagamenti con bonifico",
     )
 
-    payment_reference: Mapped[str | None] = mapped_column(
+    payment_reference: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
         doc="Riferimento pagamento (es. numero fattura da riportare in causale)",
@@ -201,7 +201,7 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
         doc="Flag esenzione IVA",
     )
 
-    vat_exemption_code: Mapped[str | None] = mapped_column(
+    vat_exemption_code: Mapped[Optional[str]] = mapped_column(
         String(10),
         nullable=True,
         doc="Codice natura esenzione IVA",
@@ -217,13 +217,13 @@ class Invoice(Base, UUIDMixin, TimestampMixin):
     # ------------------------------------------------------------
     # Colonne Note
     # ------------------------------------------------------------
-    notes: Mapped[str | None] = mapped_column(
+    notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         doc="Note interne (non stampate in fattura)",
     )
 
-    customer_notes: Mapped[str | None] = mapped_column(
+    customer_notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         doc="Note per il cliente (stampate in fattura)",
@@ -660,13 +660,13 @@ class Payment(Base, UUIDMixin, TimestampMixin):
         doc="Metodo di pagamento",
     )
 
-    reference: Mapped[str | None] = mapped_column(
+    reference: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
         doc="Riferimento (numero assegno, CRO bonifico, etc.)",
     )
 
-    notes: Mapped[str | None] = mapped_column(
+    notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         doc="Note aggiuntive sul pagamento",
@@ -801,10 +801,10 @@ class Deposit(Base, UUIDMixin, TimestampMixin):
     client_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("clients.id", ondelete="RESTRICT"), nullable=False
     )
-    work_order_id: Mapped[uuid.UUID | None] = mapped_column(
+    work_order_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid, ForeignKey("work_orders.id", ondelete="SET NULL"), nullable=True
     )
-    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
+    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid, ForeignKey("invoices.id", ondelete="RESTRICT"), nullable=True
     )
 
@@ -812,8 +812,8 @@ class Deposit(Base, UUIDMixin, TimestampMixin):
     payment_method: Mapped[str] = mapped_column(String(20), nullable=False)
     deposit_date: Mapped[date] = mapped_column(Date, nullable=False)
     
-    reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", doc="pending, applied, refunded"

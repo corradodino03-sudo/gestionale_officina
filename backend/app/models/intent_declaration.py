@@ -6,12 +6,12 @@ Le dichiarazioni di intento (ex art. 1, c. 100, L. 244/2007) permettono
 agli esportatori abituali di acquistare senza IVA fino ad un plafond dichiarato.
 """
 
-from __future__ import annotations
 
+from __future__ import annotations
 import uuid
 from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING, List
+from typing import Optional, TYPE_CHECKING, List
 
 from sqlalchemy import Boolean, Date, ForeignKey, Index, Numeric, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -100,7 +100,7 @@ class IntentDeclaration(Base, UUIDMixin, TimestampMixin):
         doc="Se la dichiarazione è attiva",
     )
 
-    notes: Mapped[str | None] = mapped_column(
+    notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         doc="Note aggiuntive",

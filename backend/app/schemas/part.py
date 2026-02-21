@@ -16,6 +16,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
+from app.core.exceptions import BusinessValidationError
+
 logger = logging.getLogger(__name__)
 
 
@@ -111,12 +113,9 @@ class PartBase(BaseModel):
         """Valida che il prezzo di vendita sia >= prezzo di acquisto."""
         if self.purchase_price and self.sale_price is not None:
             if self.sale_price < self.purchase_price:
-                logger.warning(
-                    "Prezzo di vendita inferiore al prezzo di acquisto per il ricambio %s: "
-                    "acquisto=%s, vendita=%s",
-                    self.code,
-                    self.purchase_price,
-                    self.sale_price,
+                raise BusinessValidationError(
+                    f"Prezzo di vendita ({self.sale_price}) non può essere inferiore "
+                    f"al prezzo di acquisto ({self.purchase_price})"
                 )
         return self
 

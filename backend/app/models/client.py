@@ -5,9 +5,9 @@ Progetto: Garage Manager (Gestionale Officina)
 Rappresenta l'anagrafica dei clienti (persone fisiche e giuridiche).
 """
 
-from __future__ import annotations
 
-from typing import TYPE_CHECKING, List
+from __future__ import annotations
+from typing import Optional, TYPE_CHECKING, List
 
 from sqlalchemy import Boolean, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -62,7 +62,7 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         doc="Nome o ragione sociale",
     )
 
-    surname: Mapped[str | None] = mapped_column(
+    surname: Mapped[Optional[str]] = mapped_column(
         String(100),
         nullable=True,
         doc="Cognome (per persone fisiche)",
@@ -75,7 +75,7 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         doc="Indica se è una persona giuridica",
     )
 
-    tax_id: Mapped[str | None] = mapped_column(
+    tax_id: Mapped[Optional[str]] = mapped_column(
         String(16),
         unique=True,
         nullable=True,
@@ -85,40 +85,40 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # ------------------------------------------------------------
     # Colonne Indirizzo
     # ------------------------------------------------------------
-    address: Mapped[str | None] = mapped_column(
+    address: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
         doc="Indirizzo completo",
     )
 
-    city: Mapped[str | None] = mapped_column(
+    city: Mapped[Optional[str]] = mapped_column(
         String(100),
         nullable=True,
         doc="Città",
     )
 
-    zip_code: Mapped[str | None] = mapped_column(
+    zip_code: Mapped[Optional[str]] = mapped_column(
         String(10),
         nullable=True,
         doc="CAP",
     )
 
-    province: Mapped[str | None] = mapped_column(
-        String(2),
+    province: Mapped[Optional[str]] = mapped_column(
+        String(10),
         nullable=True,
-        doc="Sigla provincia (2 caratteri)",
+        doc="Sigla provincia/stato (max 10 caratteri)",
     )
 
     # ------------------------------------------------------------
     # Colonne Contatto
     # ------------------------------------------------------------
-    phone: Mapped[str | None] = mapped_column(
+    phone: Mapped[Optional[str]] = mapped_column(
         String(20),
         nullable=True,
         doc="Numero di telefono",
     )
 
-    email: Mapped[str | None] = mapped_column(
+    email: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
         doc="Indirizzo email",
@@ -127,7 +127,7 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # ------------------------------------------------------------
     # Colonne Extra
     # ------------------------------------------------------------
-    notes: Mapped[str | None] = mapped_column(
+    notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         doc="Note aggiuntive sul cliente",
@@ -136,7 +136,7 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # ------------------------------------------------------------
     # Colonne Dati Esteri
     # ------------------------------------------------------------
-    country_code: Mapped[str | None] = mapped_column(
+    country_code: Mapped[Optional[str]] = mapped_column(
         String(2),
         nullable=True,
         default="IT",
@@ -153,13 +153,13 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # ------------------------------------------------------------
     # Colonne Fatturazione Elettronica (SDI)
     # ------------------------------------------------------------
-    sdi_code: Mapped[str | None] = mapped_column(
+    sdi_code: Mapped[Optional[str]] = mapped_column(
         String(7),
         nullable=True,
         doc="Codice Destinatario SDI (7 caratteri). '0000000' per PEC, 'XXXXXXX' per esteri",
     )
 
-    pec: Mapped[str | None] = mapped_column(
+    pec: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
         doc="PEC per fatturazione elettronica",
@@ -168,7 +168,7 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # ------------------------------------------------------------
     # Colonne Regime Fiscale
     # ------------------------------------------------------------
-    vat_regime: Mapped[str | None] = mapped_column(
+    vat_regime: Mapped[Optional[str]] = mapped_column(
         String(5),
         nullable=True,
         default="RF01",
@@ -185,13 +185,13 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         doc="True se il cliente è esente IVA",
     )
 
-    vat_exemption_code: Mapped[str | None] = mapped_column(
+    vat_exemption_code: Mapped[Optional[str]] = mapped_column(
         String(10),
         nullable=True,
         doc="Codice natura esenzione: N1, N2, N2.1, N2.2, N3, N3.1, N3.5, N4, N5, N6, N6.1, N6.9, N7",
     )
 
-    vat_exemption_reason: Mapped[str | None] = mapped_column(
+    vat_exemption_reason: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
         doc="Descrizione testuale del motivo esenzione",
@@ -227,7 +227,7 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         doc="Giorni per la scadenza fattura dalla data emissione (default 30)",
     )
 
-    payment_method_default: Mapped[str | None] = mapped_column(
+    payment_method_default: Mapped[Optional[str]] = mapped_column(
         String(20),
         nullable=True,
         doc="Metodo di pagamento predefinito: cash, pos, bank_transfer, check, other",
@@ -236,7 +236,7 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # ------------------------------------------------------------
     # Colonne Sconto Predefinito Cliente (FEAT 3)
     # ------------------------------------------------------------
-    default_discount_percent: Mapped[float | None] = mapped_column(
+    default_discount_percent: Mapped[Optional[float]] = mapped_column(
         Float,
         nullable=True,
         doc="Sconto predefinito percentuale (0-100). Es: 10.00 = 10% di sconto",
@@ -251,34 +251,34 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # ------------------------------------------------------------
     # Colonne Indirizzo Sede di Fatturazione (FEAT 5)
     # ------------------------------------------------------------
-    billing_address: Mapped[str | None] = mapped_column(
+    billing_address: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
         doc="Indirizzo sede di fatturazione (se diverso dalla sede legale)",
     )
 
-    billing_city: Mapped[str | None] = mapped_column(
+    billing_city: Mapped[Optional[str]] = mapped_column(
         String(100),
         nullable=True,
         doc="Città sede di fatturazione",
     )
 
-    billing_zip_code: Mapped[str | None] = mapped_column(
+    billing_zip_code: Mapped[Optional[str]] = mapped_column(
         String(10),
         nullable=True,
         doc="CAP sede di fatturazione",
     )
 
-    billing_province: Mapped[str | None] = mapped_column(
-        String(2),
+    billing_province: Mapped[Optional[str]] = mapped_column(
+        String(10),
         nullable=True,
-        doc="Sigla provincia sede di fatturazione (2 caratteri)",
+        doc="Sigla provincia/stato sede di fatturazione (max 10 caratteri)",
     )
 
     # ------------------------------------------------------------
     # Colonne Fido Commerciale (FEAT 7)
     # ------------------------------------------------------------
-    credit_limit: Mapped[float | None] = mapped_column(
+    credit_limit: Mapped[Optional[float]] = mapped_column(
         Float,
         nullable=True,
         doc="Fido massimo accordato al cliente. None = nessun limite",

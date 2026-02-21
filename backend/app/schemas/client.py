@@ -124,14 +124,16 @@ def normalize_province(province: Optional[str]) -> Optional[str]:
     return normalized
 
 
-def normalize_zip_code(zip_code: Optional[str]) -> Optional[str]:
+def normalize_zip_code(zip_code: Optional[str], info=None) -> Optional[str]:
     """
     Normalizza e valida il CAP (Codice di Avviamento Postale) italiano.
     
-    Il CAP deve essere esattamente 5 cifre numeriche.
+    Il CAP deve essere esattamente 5 cifre numeriche per clienti italiani.
+    Per clienti esteri, accetta qualsiasi formato non vuoto.
     
     Args:
         zip_code: CAP da validare
+        info: FieldValidationInfo per accedere ad altri campi
         
     Returns:
         CAP normalizzato o None
@@ -144,10 +146,19 @@ def normalize_zip_code(zip_code: Optional[str]) -> Optional[str]:
     
     normalized = zip_code.strip()
     
-    # Deve essere esattamente 5 cifre numeriche
-    if not re.match(r"^\d{5}$", normalized):
-        raise ValueError("Il CAP deve essere esattamente 5 cifre numeriche")
+    # Check if this is a foreign client by checking the context
+    # We need to check is_foreign and country_code fields
+    # This is a workaround since field_validator doesn't have easy access to other fields
+    # So we just accept any non-empty string for now and do strict validation at model level
     
+    # For Italian clients, require 5 numeric digits
+    # For foreign clients, accept any format
+    # We do a lenient validation here and let model_validator do strict checks
+    if not normalized:
+        raise ValueError("Il CAP non può essere vuoto")
+    
+    # Accept any format here - the model validator will do strict validation
+    # for Italian clients
     return normalized
 
 
@@ -463,6 +474,24 @@ class ClientValidatorsMixin(BaseModel):
         # 5. Se is_foreign è True e sdi_code non specificato, usa "XXXXXXX"
         if self.is_foreign is True and not self.sdi_code:
             self.sdi_code = "XXXXXXX"
+        
+        # 6. Validazione ZIP code rigorosa - SOLO per clienti italiani
+        if self.zip_code and field_is_relevant("zip_code"):
+            effective_country_code = self.country_code
+            if effective_country_code is None and not field_is_relevant("country_code"):
+                effective_country_code = "IT"
+            
+            is_italian = (
+                self.is_foreign is not True
+                and effective_country_code in ("IT", None)
+            )
+            
+            if is_italian:
+                # Italian CAP: must be exactly 5 numeric digits
+                if not re.match(r"^\d{5}$", self.zip_code):
+                    raise BusinessValidationError(
+                        "Il CAP deve essere esattamente 5 cifre numeriche"
+                    )
         
         # 6. Log informativo per reverse charge
         # Con use_enum_values=True, self.vat_exemption_code è già una stringa

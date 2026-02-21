@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional
 
 import uuid
 from datetime import date
@@ -25,10 +26,10 @@ class CashRegisterClose(Base, UUIDMixin, TimestampMixin):
     close_date: Mapped[date] = mapped_column(
         Date, unique=True, nullable=False, doc="Data di chiusura"
     )
-    closed_by: Mapped[str | None] = mapped_column(
+    closed_by: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, doc="Operatore che ha chiuso la cassa"
     )
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     total_cash: Mapped[Decimal] = mapped_column(
         Numeric(10, 2), nullable=False, default=Decimal("0.00")

@@ -503,3 +503,51 @@ async def remove_part_from_work_order(
     """
     await part_service.remove_part_from_work_order(db, work_order_id, usage_id)
     await db.commit()
+
+
+# -------------------------------------------------------------------
+# Endpoints: Aggiornamento Parziale (Alias)
+# -------------------------------------------------------------------
+
+@router.patch(
+    "/{work_order_id}",
+    name="ordine_aggiorna_parziale",
+    summary="Aggiorna ordine di lavoro (parziale)",
+    description="Aggiorna parzialmente un ordine di lavoro (Alias di PUT). "
+                "NOTA: per cambiare lo stato usare l'endpoint PATCH /status.",
+    response_model=WorkOrderRead,
+    status_code=status.HTTP_200_OK,
+)
+async def patch_work_order(
+    work_order_id: uuid.UUID = Path(..., description="UUID dell'ordine di lavoro"),
+    data: WorkOrderUpdate = ...,
+    db: AsyncSession = Depends(get_db),
+) -> WorkOrderRead:
+    """
+    Alias di PUT per l'aggiornamento parziale di un ordine di lavoro.
+    """
+    work_order = await work_order_service.update(db, work_order_id, data)
+    await db.commit()
+    return WorkOrderRead.model_validate(work_order)
+
+
+@router.patch(
+    "/{work_order_id}/items/{item_id}",
+    name="voce_aggiorna_parziale",
+    summary="Aggiorna voce di lavoro (parziale)",
+    description="Aggiorna parzialmente una voce di lavoro esistente (Alias di PUT).",
+    response_model=WorkOrderItemRead,
+    status_code=status.HTTP_200_OK,
+)
+async def patch_work_order_item(
+    work_order_id: uuid.UUID = Path(..., description="UUID dell'ordine di lavoro"),
+    item_id: uuid.UUID = Path(..., description="UUID della voce di lavoro"),
+    item_data: WorkOrderItemUpdate = ...,
+    db: AsyncSession = Depends(get_db),
+) -> WorkOrderItemRead:
+    """
+    Alias di PUT per l'aggiornamento parziale di una voce di lavoro.
+    """
+    item = await work_order_service.update_item(db, work_order_id, item_id, item_data)
+    await db.commit()
+    return WorkOrderItemRead.model_validate(item)

@@ -5,10 +5,10 @@ Progetto: Garage Manager (Gestionale Officina)
 Rappresenta i veicoli associati ai clienti.
 """
 
-from __future__ import annotations
 
+from __future__ import annotations
 import uuid
-from typing import TYPE_CHECKING, List
+from typing import Optional, TYPE_CHECKING, List
 
 from sqlalchemy import ForeignKey, Index, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -82,7 +82,7 @@ class Vehicle(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         doc="Modello del veicolo",
     )
     
-    color: Mapped[str | None] = mapped_column(
+    color: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
         doc="Colore del veicolo",
@@ -91,7 +91,7 @@ class Vehicle(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # ------------------------------------------------------------
     # Colonne Dati Tecnici Opzionali
     # ------------------------------------------------------------
-    year: Mapped[int | None] = mapped_column(
+    year: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True,
         doc="Anno di immatricolazione",
@@ -104,14 +104,14 @@ class Vehicle(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         doc="Chilometraggio attuale",
     )
 
-    vin: Mapped[str | None] = mapped_column(
+    vin: Mapped[Optional[str]] = mapped_column(
         String(17),
         unique=True,
         nullable=True,
         doc="Numero telaio (Vehicle Identification Number)",
     )
 
-    fuel_type: Mapped[str | None] = mapped_column(
+    fuel_type: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
         doc="Tipo di carburante",
@@ -120,7 +120,7 @@ class Vehicle(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # ------------------------------------------------------------
     # Colonne Extra
     # ------------------------------------------------------------
-    notes: Mapped[str | None] = mapped_column(
+    notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         doc="Note aggiuntive sul veicolo",

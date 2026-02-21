@@ -7,8 +7,8 @@ Progetto: Garage Manager (Gestionale Officina)
 - WorkOrderItem: Voci di lavoro (manodopera/interventi) associate all'ordine
 """
 
-from __future__ import annotations
 
+from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -88,7 +88,7 @@ class WorkOrder(Base, UUIDMixin, TimestampMixin):
         doc="UUID del veicolo oggetto dell'intervento",
     )
 
-    assigned_technician_id: Mapped[uuid.UUID | None] = mapped_column(
+    assigned_technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid,
         ForeignKey("technicians.id", ondelete="SET NULL"),
         nullable=True,
@@ -112,37 +112,37 @@ class WorkOrder(Base, UUIDMixin, TimestampMixin):
         doc="Descrizione del problema segnalato dal cliente",
     )
 
-    diagnosis: Mapped[str | None] = mapped_column(
+    diagnosis: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         doc="Diagnosi del meccanico dopo ispezione",
     )
 
-    km_in: Mapped[int | None] = mapped_column(
+    km_in: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True,
         doc="Chilometraggio al momento dell'ingresso",
     )
 
-    km_out: Mapped[int | None] = mapped_column(
+    km_out: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True,
         doc="Chilometraggio alla consegna",
     )
 
-    estimated_delivery: Mapped[date | None] = mapped_column(
+    estimated_delivery: Mapped[Optional[date]] = mapped_column(
         Date,
         nullable=True,
         doc="Data prevista consegna",
     )
 
-    completed_at: Mapped[datetime | None] = mapped_column(
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         doc="Data/ora completamento ordine",
     )
 
-    internal_notes: Mapped[str | None] = mapped_column(
+    internal_notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         doc="Note interne tra operatori",
@@ -266,7 +266,7 @@ class WorkOrderItem(Base, UUIDMixin, TimestampMixin):
         doc="UUID dell'ordine di lavoro padre",
     )
 
-    technician_id: Mapped[uuid.UUID | None] = mapped_column(
+    technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid,
         ForeignKey("technicians.id", ondelete="SET NULL"),
         nullable=True,

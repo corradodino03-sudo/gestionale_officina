@@ -10,7 +10,7 @@ Contiene:
 """
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Optional
@@ -24,7 +24,8 @@ from pydantic import (
     model_validator,
 )
 
-from app.core.exceptions import BusinessValidationError
+# SCH-3: Pydantic validators raise ValueError, not BusinessValidationError
+# (removed import - not needed anymore)
 
 
 # -------------------------------------------------------------------
@@ -80,9 +81,10 @@ class InvoiceLineBase(BaseModel):
         max_length=500,
         description="Descrizione della riga"
     )
+    # SCH-10: quantity non deve ammettere zero - gt=0 invece di ge=0
     quantity: Decimal = Field(
         ...,
-        ge=0,
+        gt=0,
         description="Quantità",
         serialization_alias="quantity"
     )
@@ -93,10 +95,10 @@ class InvoiceLineBase(BaseModel):
         serialization_alias="unitPrice"
     )
     # FEAT 3: Sconto sulla riga
-    discount_percent: float = Field(
-        default=0.0,
-        ge=0,
-        le=100,
+    discount_percent: Decimal = Field(
+        default=Decimal("0.00"),
+        ge=Decimal("0"),
+        le=Decimal("100"),
         description="Percentuale di sconto applicata (0-100)",
         serialization_alias="discountPercent"
     )
@@ -127,8 +129,9 @@ class InvoiceLineRead(InvoiceLineBase):
     
     id: uuid.UUID = Field(..., description="UUID della riga fattura")
     invoice_id: uuid.UUID = Field(..., description="UUID della fattura")
-    created_at: date = Field(..., description="Data/ora creazione")
-    updated_at: date = Field(..., description="Data/ora ultimo aggiornamento")
+    # SCH-5: timestamps da date a datetime
+    created_at: datetime = Field(..., description="Data/ora creazione")
+    updated_at: datetime = Field(..., description="Data/ora ultimo aggiornamento")
     # FEAT 3: Importo sconto
     discount_amount: Decimal = Field(
         default=Decimal("0"),
@@ -197,7 +200,8 @@ class PaymentAllocationRead(PaymentAllocationBase):
         description="UUID del pagamento",
         serialization_alias="paymentId"
     )
-    created_at: date = Field(..., description="Data/ora creazione")
+    # SCH-5: timestamps da date a datetime
+    created_at: datetime = Field(..., description="Data/ora creazione")
     
     # Denormalizzazione opzionale per comodità API
     invoice_number: Optional[str] = Field(
@@ -241,8 +245,10 @@ class PaymentBase(BaseModel):
         max_length=255,
         description="Riferimento (numero assegno, CRO bonifico, etc.)"
     )
+    # SCH-11: max_length sulle note
     notes: Optional[str] = Field(
         None,
+        max_length=2000,
         description="Note aggiuntive sul pagamento"
     )
     
@@ -252,8 +258,7 @@ class PaymentBase(BaseModel):
     @classmethod
     def validate_payment_date(cls, v: date) -> date:
         """Valida che la data pagamento non sia futura."""
-        from datetime import date as today
-        if v > today.today():
+        if v > date.today():
             raise ValueError("La data del pagamento non può essere futura")
         return v
 
@@ -283,19 +288,20 @@ class PaymentCreate(PaymentBase):
         description="Allocazioni manuali (usato solo se strategy='manual')"
     )
     
+    # SCH-3: Usa ValueError invece di BusinessValidationError
     @model_validator(mode="after")
     def validate_allocation_strategy(self) -> "PaymentCreate":
         """Valida coerenza tra strategy e allocations."""
         if self.allocation_strategy == "manual":
             if not self.allocations:
-                raise BusinessValidationError(
+                raise ValueError(
                     "Se allocation_strategy='manual', devi specificare allocations"
                 )
             
             # Verifica che la somma allocations <= amount
             total_allocated = sum(a.amount for a in self.allocations)
             if total_allocated > self.amount:
-                raise BusinessValidationError(
+                raise ValueError(
                     f"Somma allocazioni ({total_allocated}) supera importo pagamento ({self.amount})"
                 )
         
@@ -306,7 +312,8 @@ class PaymentRead(PaymentBase):
     """Schema per leggere un pagamento esistente."""
     
     id: uuid.UUID = Field(..., description="UUID del pagamento")
-    created_at: date = Field(..., description="Data/ora creazione")
+    # SCH-5: timestamps da date a datetime
+    created_at: datetime = Field(..., description="Data/ora creazione")
     
     # Allocazioni
     allocations: list[PaymentAllocationRead] = Field(
@@ -367,56 +374,45 @@ class InvoiceBase(BaseModel):
         description="Aliquota IVA applicata (default 22%)",
         serialization_alias="vatRate"
     )
+    # SCH-11: max_length sulle note
     notes: Optional[str] = Field(
         None,
+        max_length=2000,
         description="Note interne (non stampate in fattura)"
     )
     customer_notes: Optional[str] = Field(
         None,
+        max_length=2000,
         description="Note per il cliente (stampate in fattura)",
         serialization_alias="customerNotes"
     )
     
     model_config = ConfigDict(from_attributes=True)
     
+    # SCH-3: Usa ValueError invece di BusinessValidationError
     @model_validator(mode="after")
     def validate_dates(self) -> "InvoiceBase":
         """Valida che due_date >= invoice_date."""
         if self.due_date < self.invoice_date:
-            raise BusinessValidationError(
+            raise ValueError(
                 "La data di scadenza non può essere precedente alla data fattura"
             )
         return self
-
-
-class InvoiceCreate(InvoiceBase):
-    """Schema per la creazione di una fattura."""
-    
-    # NON include:
-    # - client_id (preso dal work_order)
-    # - invoice_number (generato automaticamente dal service)
-    # - subtotal/vat_amount/total (calcolati dal service)
-    # - vat_exemption/split_payment (copiati dal cliente)
-    
-    @field_validator("vat_rate")
-    @classmethod
-    def validate_vat_rate(cls, v: Decimal) -> Decimal:
-        """Valida l'aliquota IVA."""
-        if v < 0 or v > 100:
-            raise ValueError("L'aliquota IVA deve essere compresa tra 0 e 100")
-        return v
 
 
 class InvoiceUpdate(BaseModel):
     """Schema per l'aggiornamento di una fattura."""
     
     # Campi modificabili dopo la creazione
+    # SCH-11: max_length sulle note
     notes: Optional[str] = Field(
         None,
+        max_length=2000,
         description="Note interne (non stampate in fattura)"
     )
     customer_notes: Optional[str] = Field(
         None,
+        max_length=2000,
         description="Note per il cliente (stampate in fattura)",
         serialization_alias="customerNotes"
     )
@@ -428,11 +424,12 @@ class InvoiceUpdate(BaseModel):
     
     model_config = ConfigDict(from_attributes=True)
     
+    # SCH-3: Usa ValueError invece di BusinessValidationError
     @model_validator(mode="after")
     def validate_update(self) -> "InvoiceUpdate":
         """Valida che almeno un campo sia stato modificato."""
         if not any([self.notes is not None, self.customer_notes is not None, self.due_date is not None]):
-            raise BusinessValidationError("È necessario modificare almeno un campo")
+            raise ValueError("È necessario modificare almeno un campo")
         return self
 
 
@@ -499,9 +496,9 @@ class InvoiceRead(InvoiceBase):
     bill_to_address: Optional[str] = Field(None, serialization_alias="billToAddress")
     claim_number: Optional[str] = Field(None, serialization_alias="claimNumber")
     
-    # Timestamps
-    created_at: date = Field(..., description="Data/ora creazione")
-    updated_at: date = Field(..., description="Data/ora ultimo aggiornamento")
+    # SCH-5: timestamps da date a datetime
+    created_at: datetime = Field(..., description="Data/ora creazione")
+    updated_at: datetime = Field(..., description="Data/ora ultimo aggiornamento")
     
     # Relazioni
     lines: list[InvoiceLineRead] = Field(
@@ -528,37 +525,55 @@ class InvoiceRead(InvoiceBase):
         """Importo residuo da incassare."""
         return self.total - self.paid_amount
     
+    # SCH-7: amount_due_from_client come computed field
+    @computed_field
+    @property
+    def amount_due_from_client(self) -> Decimal:
+        """
+        Per split payment PA: il cliente paga solo imponibile + bollo.
+        
+        L'IVA è versata direttamente all'Erario dall'ente acquirente.
+        """
+        if self.split_payment:
+            return self.subtotal + self.stamp_duty_amount
+        return self.total
+    
+    # SCH-6: Ordine dei branch in status - OVERDUE ha precedenza su PARTIAL
     @computed_field
     @property
     def status(self) -> InvoiceStatus:
         """
         Stato calcolato in base ai pagamenti:
+        - 'credited': stornata da nota di credito
         - 'paid': totalmente pagata
+        - 'overdue': scaduta e non pagata
         - 'partial': parzialmente pagata
         - 'unpaid': non pagata
-        - 'overdue': scaduta e non pagata
         """
-        from datetime import date as today
+        # Controlla se stornata da nota di credito
+        if hasattr(self, 'credit_notes') and self.credit_notes:
+            return InvoiceStatus.CREDITED
         
         if self.paid_amount >= self.total:
             return InvoiceStatus.PAID
-        elif self.paid_amount > 0:
-            return InvoiceStatus.PARTIAL
-        elif today.today() > self.due_date:
+        # SCH-6: OVERDUE ha precedenza su PARTIAL - check scadenza PRIMA
+        if date.today() > self.due_date:
             return InvoiceStatus.OVERDUE
-        else:
-            return InvoiceStatus.UNPAID
+        # POI check parziale
+        if self.paid_amount > 0:
+            return InvoiceStatus.PARTIAL
+        return InvoiceStatus.UNPAID
     
     @computed_field
     @property
     def is_overdue(self) -> bool:
         """True se la fattura è scaduta e non completamente pagata."""
-        from datetime import date as today
-        return today.today() > self.due_date and self.remaining_amount > 0
+        return date.today() > self.due_date and self.remaining_amount > 0
     
     model_config = ConfigDict(from_attributes=True)
 
 
+# SCH-9: Rimuovere from_attributes=True da non-ORM schemas
 class InvoiceList(BaseModel):
     """Schema per la lista paginata delle fatture."""
     
@@ -586,14 +601,14 @@ class InvoiceList(BaseModel):
         description="Numero totale di pagine",
         serialization_alias="totalPages"
     )
-    
-    model_config = ConfigDict(from_attributes=True)
+    # SCH-9: Rimosso from_attributes=True
 
 
 # -------------------------------------------------------------------
 # Schemas per Report
 # -------------------------------------------------------------------
 
+# SCH-9: Rimuovere from_attributes=True da non-ORM schemas
 class RevenueReport(BaseModel):
     """Schema per il report degli incassi."""
     
@@ -622,8 +637,7 @@ class RevenueReport(BaseModel):
         description="Numero di pagamenti nel periodo",
         serialization_alias="paymentsCount"
     )
-    
-    model_config = ConfigDict(from_attributes=True)
+    # SCH-9: Rimosso from_attributes=True
 
 
 # -------------------------------------------------------------------
@@ -643,22 +657,37 @@ class CreateInvoiceFromWorkOrder(BaseModel):
         description="Data scadenza pagamento (default: invoice_date + 30 giorni)",
         serialization_alias="dueDate"
     )
+    # SCH-11: max_length sulle note
     customer_notes: Optional[str] = Field(
         None,
+        max_length=2000,
         description="Note per il cliente (stampate in fattura)",
         serialization_alias="customerNotes"
     )
-    vat_rate: Decimal = Field(
-        default=Decimal("22.00"),
+    # SCH-2: vat_rate con default None per distinguere "utente ha scelto" da "usa default"
+    vat_rate: Optional[Decimal] = Field(
+        default=None,
         ge=Decimal("0"),
         le=Decimal("100"),
-        description="Aliquota IVA applicata (default 22% standard Italia)",
+        description="Aliquota IVA. Se omessa, usa il default del cliente o 22%",
         serialization_alias="vatRate"
     )
     bill_to_client_id: Optional[uuid.UUID] = Field(None, serialization_alias="billToClientId")
     claim_number: Optional[str] = Field(None, serialization_alias="claimNumber")
     
     model_config = ConfigDict(from_attributes=True)
+    
+    # SCH-3: Usa ValueError invece di BusinessValidationError
+    # SCH-12: Validazione date - già presente, mantiene la logica
+    @model_validator(mode="after")
+    def validate_dates(self) -> "CreateInvoiceFromWorkOrder":
+        """Valida che due_date >= invoice_date."""
+        if self.invoice_date and self.due_date:
+            if self.due_date < self.invoice_date:
+                raise ValueError(
+                    "La data di scadenza non può essere precedente alla data fattura"
+                )
+        return self
 
 
 # -------------------------------------------------------------------
@@ -684,6 +713,7 @@ class CreditNoteLineRead(BaseModel):
     quantity: Decimal
     unit_price: Decimal
     vat_rate: Decimal
+    # SCH-4: discount_percent da float a Decimal
     discount_percent: Decimal
     discount_amount: Decimal
     line_number: int
@@ -718,8 +748,9 @@ class CreditNoteRead(BaseModel):
     vat_amount: Decimal = Field(..., serialization_alias="vatAmount")
     total: Decimal
     stamp_duty_amount: Decimal = Field(..., serialization_alias="stampDutyAmount")
-    created_at: date
-    updated_at: date
+    # SCH-5: timestamps da date a datetime
+    created_at: datetime
+    updated_at: datetime
 
     lines: list[CreditNoteLineRead]
 
@@ -737,7 +768,8 @@ class DepositBase(BaseModel):
     payment_method: PaymentMethod = Field(..., serialization_alias="paymentMethod")
     deposit_date: date = Field(..., serialization_alias="depositDate")
     reference: Optional[str] = None
-    notes: Optional[str] = None
+    # SCH-11: max_length sulle note
+    notes: Optional[str] = Field(None, max_length=2000)
 
 class DepositCreate(DepositBase):
     pass
@@ -746,17 +778,22 @@ class DepositRead(DepositBase):
     id: uuid.UUID
     status: DepositStatus
     invoice_id: Optional[uuid.UUID] = Field(None, serialization_alias="invoiceId")
-    created_at: date
-    updated_at: date
+    # SCH-5: timestamps da date a datetime
+    created_at: datetime
+    updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
+# SCH-9: Rimuovere from_attributes=True da non-ORM schemas
 class PendingDepositSummary(BaseModel):
     deposits: list[DepositRead]
     total_amount: Decimal = Field(..., serialization_alias="totalAmount")
+    # SCH-9: Rimosso from_attributes=True
 
+# SCH-1: InvoiceCreationResponse - Already uses InvoiceRead (not InvoiceReadSchema)
 class InvoiceCreationResponse(BaseModel):
-    invoice: InvoiceReadSchema
-    pending_deposits: Optional[PendingDepositSummary] = Field(None, serialization_alias="pendingDeposits")
-
-
+    invoice: InvoiceRead
+    pending_deposits: Optional[PendingDepositSummary] = Field(
+        None, serialization_alias="pendingDeposits"
+    )
+    # SCH-9: Rimosso from_attributes=True

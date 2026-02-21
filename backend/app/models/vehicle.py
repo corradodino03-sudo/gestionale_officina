@@ -5,6 +5,8 @@ Progetto: Garage Manager (Gestionale Officina)
 Rappresenta i veicoli associati ai clienti.
 """
 
+from __future__ import annotations
+
 import uuid
 from typing import TYPE_CHECKING, List
 

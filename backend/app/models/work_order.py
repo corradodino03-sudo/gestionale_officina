@@ -7,6 +7,8 @@ Progetto: Garage Manager (Gestionale Officina)
 - WorkOrderItem: Voci di lavoro (manodopera/interventi) associate all'ordine
 """
 
+from __future__ import annotations
+
 import uuid
 from datetime import date, datetime
 from decimal import Decimal

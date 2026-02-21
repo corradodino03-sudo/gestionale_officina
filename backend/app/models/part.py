@@ -8,6 +8,8 @@ Contiene:
 - StockMovement: Movimenti di magazzino
 """
 
+from __future__ import annotations
+
 import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING, List, Optional

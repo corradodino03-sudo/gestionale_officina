@@ -148,7 +148,8 @@ class InvoiceService:
         bill_to_tax_id = None
         bill_to_address = None
         
-        if getattr(data, 'bill_to_client_id', None):
+        # SVC-6: Accesso diretto ai campi dello schema Pydantic
+        if data.bill_to_client_id:
             stmt_billing = select(Client).where(Client.id == data.bill_to_client_id)
             res_billing = await db.execute(stmt_billing)
             billing_client_res = res_billing.scalar_one_or_none()
@@ -166,6 +167,43 @@ class InvoiceService:
             
             bill_to_address = billing_client.effective_billing_address if hasattr(billing_client, 'effective_billing_address') else (
                 f"{billing_client.address}, {billing_client.city} ({billing_client.province}) {billing_client.zip_code}"
+            )
+            
+            # FIX: Serializza dict in formato indirizzo leggibile
+            if isinstance(bill_to_address, dict):
+                bill_to_address = (
+                    f"{bill_to_address.get('address', '')}, "
+                    f"{bill_to_address.get('city', '')} "
+                    f"({bill_to_address.get('province', '')}) "
+                    f"{bill_to_address.get('zip_code', '')}"
+                ).strip(", ")
+        
+        # Se non è fattura a terzi, popola bill_to_* dal cliente principale
+        if not data.bill_to_client_id:
+            raw_address = getattr(
+                billing_client, 'effective_billing_address', None
+            ) or {
+                "address": getattr(billing_client, 'address', ''),
+                "city": getattr(billing_client, 'city', ''),
+                "zip_code": getattr(billing_client, 'zip_code', ''),
+                "province": getattr(billing_client, 'province', ''),
+            }
+            if isinstance(raw_address, dict):
+                bill_to_address = (
+                    f"{raw_address.get('address', '')}, "
+                    f"{raw_address.get('city', '')} "
+                    f"({raw_address.get('province', '')}) "
+                    f"{raw_address.get('zip_code', '')}"
+                ).strip(", ")
+            else:
+                bill_to_address = raw_address
+            
+            bill_to_name = (
+                billing_client.company_name
+                or f"{billing_client.first_name} {billing_client.last_name}".strip()
+            )
+            bill_to_tax_id = (
+                billing_client.vat_number or billing_client.tax_code
             )
         
         # Step 5: Genera numero fattura
@@ -191,12 +229,12 @@ class InvoiceService:
         if getattr(billing_client, 'vat_regime', None) == "RF19":  # Forfettario
             is_vat_exempt = True
             effective_vat_rate = Decimal("0")
-            vat_exemption_code = "N3.5"  # Non imponibili - dichiarazioni intento
+            vat_exemption_code = "N2.2"  # Non soggette - altri casi (era N3.5 - ERRATO)
             vat_notes = "Operazione effettuata ai sensi dell'art. 1, commi 54-89, L. 190/2014 - Regime Forfettario"
         elif getattr(billing_client, 'vat_regime', None) == "RF02":  # Minimi
             is_vat_exempt = True
             effective_vat_rate = Decimal("0")
-            vat_exemption_code = "N3.5"
+            vat_exemption_code = "N2.2"  # Non soggette - altri casi (era N3.5 - ERRATO)
             vat_notes = "Operazione effettuata ai sensi dell'art. 27, commi 1 e 2, D.L. 98/2011 - Regime dei Minimi"
         elif getattr(billing_client, 'vat_exemption', False):  # Esente IVA generico
             is_vat_exempt = True
@@ -231,7 +269,7 @@ class InvoiceService:
             
             # Usa effective_vat_rate (potrebbe essere 0 per regimi speciali)
             item_vat_rate = effective_vat_rate
-            item_vat = ((item_subtotal - discount_amount) * item_vat_rate) / Decimal("100")
+            item_vat = ((item_subtotal - discount_amount) * item_vat_rate / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             total_vat += item_vat
             
             if item_vat_rate == Decimal("0"):
@@ -271,7 +309,7 @@ class InvoiceService:
             else:
                 part_vat_rate = effective_vat_rate
             
-            part_vat = ((part_subtotal - discount_amount) * part_vat_rate) / Decimal("100")
+            part_vat = ((part_subtotal - discount_amount) * part_vat_rate / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             total_vat += part_vat
             
             if part_vat_rate == Decimal("0"):
@@ -317,13 +355,7 @@ class InvoiceService:
         # Arrotonda total preliminare a 2 decimali
         total = total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         
-        # FEAT 5: Prepara indirizzo fatturazione effettivo
-        billing_address = getattr(billing_client, 'effective_billing_address', None) or {
-            "address": getattr(billing_client, 'address', ''),
-            "city": getattr(billing_client, 'city', ''),
-            "zip_code": getattr(billing_client, 'zip_code', ''),
-            "province": getattr(billing_client, 'province', ''),
-        }
+        # FEAT 5: Prepara indirizzo fatturazione effettivo (usato in bill_to_address)
         
         # FEAT 6: Gestione dichiarazioni di intento
         # Se il cliente ha una dichiarazione di intento attiva e valida
@@ -337,6 +369,7 @@ class InvoiceService:
                     IntentDeclaration.is_active == True,
                     IntentDeclaration.expiry_date >= invoice_date,
                 )
+                .with_for_update()
                 .order_by(IntentDeclaration.expiry_date.desc())
             )
             intent_result = await db.execute(intent_stmt)
@@ -382,6 +415,13 @@ class InvoiceService:
             stamp_duty_amount = settings.stamp_duty_amount
             total += stamp_duty_amount
         
+        # SVC-3: Split payment calculation
+        # FEAT 3 (P0-Fix Round 4): Split payment calculation
+        # PA: il cliente paga imponibile + bollo, l'IVA va all'Erario
+        amount_due_from_client = total  # default: il cliente paga tutto
+        if getattr(billing_client, 'split_payment', False):
+            amount_due_from_client = subtotal + stamp_duty_amount
+        
         # FEAT 7: Controllo fido commerciale
         credit_limit_warning = None
         if client.credit_limit is not None and client.credit_limit > 0:
@@ -397,15 +437,15 @@ class InvoiceService:
             total_invoices_result = await db.execute(total_invoices_stmt)
             total_invoiced = total_invoices_result.scalar() or Decimal("0")
             
-            # Get total of all payments allocated to this client's invoices
-            total_payments_stmt = (
-                select(func.coalesce(func.sum(Payment.amount), 0))
-                .join(PaymentAllocation)
-                .join(Invoice)
+            # SVC-1: Somma allocazioni invece di pagamenti per credit limit
+            # FIX: Use PaymentAllocation.amount instead of Payment.amount to avoid duplication
+            total_paid_stmt = (
+                select(func.coalesce(func.sum(PaymentAllocation.amount), 0))
+                .join(Invoice, PaymentAllocation.invoice_id == Invoice.id)
                 .where(Invoice.client_id == client.id)
             )
-            total_payments_result = await db.execute(total_payments_stmt)
-            total_paid = total_payments_result.scalar() or Decimal("0")
+            total_paid_result = await db.execute(total_paid_stmt)
+            total_paid = total_paid_result.scalar() or Decimal("0")
             
             current_exposure = total_invoiced - total_paid
             new_exposure = current_exposure + total
@@ -426,12 +466,24 @@ class InvoiceService:
                         f"Esposizione attuale: {current_exposure}, nuovo importo: {total}"
                     )
         
-        # Combina le note
-        notes = data.customer_notes or ""
+        # Note visibili al cliente (stampate in fattura)
+        customer_notes_parts = []
+        if data.customer_notes:
+            customer_notes_parts.append(data.customer_notes)
         if vat_notes:
-            notes = f"{notes}\n{vat_notes}".strip()
+            # Diciture legali IVA DEVONO essere visibili sul documento
+            customer_notes_parts.append(vat_notes)
+        final_customer_notes = (
+            "\n".join(customer_notes_parts) if customer_notes_parts else None
+        )
+        
+        # Note interne (NON stampate — riservate all'operatore)
+        internal_notes_parts = []
         if credit_limit_warning:
-            notes = f"{notes}\n{credit_limit_warning}".strip()
+            internal_notes_parts.append(credit_limit_warning)
+        final_internal_notes = (
+            "\n".join(internal_notes_parts) if internal_notes_parts else None
+        )
         
         # FEAT 2: Dati bancari
         payment_iban = None
@@ -447,8 +499,8 @@ class InvoiceService:
             bill_to_client_id=data.bill_to_client_id,
             bill_to_name=bill_to_name,
             bill_to_tax_id=bill_to_tax_id,
-            bill_to_address=bill_to_address if isinstance(bill_to_address, str) else str(bill_to_address),
-            claim_number=getattr(data, "claim_number", None),
+            bill_to_address=bill_to_address,
+            claim_number=data.claim_number,
             invoice_number=invoice_number,
             invoice_date=invoice_date,
             due_date=due_date,
@@ -459,8 +511,9 @@ class InvoiceService:
             vat_exemption=is_vat_exempt,
             vat_exemption_code=vat_exemption_code,
             split_payment=getattr(billing_client, 'split_payment', False),
-            notes=notes,
-            customer_notes=data.customer_notes,
+            amount_due_from_client=amount_due_from_client,
+            notes=final_internal_notes,
+            customer_notes=final_customer_notes,
             stamp_duty_applied=stamp_duty_applied,
             stamp_duty_amount=stamp_duty_amount,
             payment_iban=payment_iban,
@@ -479,29 +532,35 @@ class InvoiceService:
         
         try:
             await db.commit()
-            await db.refresh(invoice)
         except IntegrityError as e:
             await db.rollback()
             logger.error(f"Errore di integrità durante creazione fattura: {e}")
             raise ConflictError("Errore durante la creazione della fattura")
         
-        # Step 17: Ricarica con relazioni
+        # Post-commit: queste operazioni non necessitano rollback
+        await db.refresh(invoice)
         final_invoice = await self.get_by_id(db, invoice.id)
         
         # Controllare se esistono caparre pending (FEAT 2)
-        deposits = await DepositService.get_by_client(final_invoice.client_id, db)
-        
-        pending_deposits = [
-            d for d in deposits 
-            if d.status == DepositStatus.PENDING.value and (d.work_order_id == work_order_id or d.work_order_id is None)
-        ]
-        
         pending_deposits_summary = None
-        if pending_deposits:
-            total_available = sum(d.amount for d in pending_deposits)
-            pending_deposits_summary = PendingDepositSummary(
-                deposits=pending_deposits,
-                total_amount=total_available
+        try:
+            deposits = await DepositService.get_by_client(final_invoice.client_id, db)
+            
+            pending_deposits = [
+                d for d in deposits 
+                if d.status == DepositStatus.PENDING.value and (d.work_order_id == work_order_id or d.work_order_id is None)
+            ]
+            
+            if pending_deposits:
+                total_available = sum(d.amount for d in pending_deposits)
+                pending_deposits_summary = PendingDepositSummary(
+                    deposits=pending_deposits,
+                    total_amount=total_available
+                )
+        except Exception as e:
+            logger.warning(
+                f"Fattura {invoice.invoice_number} creata correttamente, "
+                f"ma errore nel recupero caparre pending: {e}"
             )
             
         return InvoiceCreationResponse(
@@ -828,7 +887,8 @@ class InvoiceService:
         if invoice.payment_allocations:
             raise BusinessValidationError(
                 "Impossibile eliminare una fattura con pagamenti registrati. "
-                "Rimuovere prima i pagamenti."
+                "Rimuovere prima i pagamenti, oppure emettere una nota di credito "
+                "tramite POST /invoices/{id}/credit-note."
             )
         
         # P3-Fix 9: Verifica stato work_order prima di sovrascrivere
@@ -893,17 +953,24 @@ class InvoiceService:
         await db.flush()  # Genera payment.id
         
         # Alloca su fatture
-        manual_allocs = None
+        # FIX: Inferisce la strategia dalla presenza delle allocazioni manuali
         if payment_data.allocations:
+            effective_strategy = "manual"
             manual_allocs = [
                 {"invoice_id": a.invoice_id, "amount": a.amount}
                 for a in payment_data.allocations
             ]
-        
+        elif payment_data.allocation_strategy:
+            effective_strategy = payment_data.allocation_strategy
+            manual_allocs = None
+        else:
+            effective_strategy = "fifo"
+            manual_allocs = None
+
         allocations = await self._allocate_payment(
             db,
             payment,
-            strategy=payment_data.allocation_strategy or "fifo",
+            strategy=effective_strategy,
             manual_allocations=manual_allocs
         )
         
@@ -912,6 +979,65 @@ class InvoiceService:
         
         return payment
 
+    async def _allocate_auto(
+        self,
+        db: AsyncSession,
+        payment: Payment,
+        strategy: str,
+    ) -> list[PaymentAllocation]:
+        """Allocazione automatica FIFO o overdue_first."""
+        
+        order_clauses = {
+            "fifo": [Invoice.invoice_date.asc()],
+            "overdue_first": [
+                (Invoice.due_date < date.today()).desc(),
+                Invoice.invoice_date.asc(),
+            ],
+        }
+        
+        stmt = (
+            select(Invoice)
+            .where(Invoice.client_id == payment.client_id)
+            .with_for_update()
+            .options(selectinload(Invoice.payment_allocations))
+            .order_by(*order_clauses[strategy])
+        )
+        
+        result = await db.execute(stmt)
+        open_invoices = [
+            inv for inv in result.scalars().all()
+            if inv.remaining_amount > Decimal("0")
+        ]
+        
+        if not open_invoices:
+            raise BusinessValidationError(
+                "Nessuna fattura aperta da pagare"
+            )
+        
+        allocations_created = []
+        remaining = payment.amount
+        
+        for invoice in open_invoices:
+            if remaining <= Decimal("0"):
+                break
+            to_allocate = min(remaining, invoice.remaining_amount)
+            allocation = PaymentAllocation(
+                payment_id=payment.id,
+                invoice_id=invoice.id,
+                amount=to_allocate
+            )
+            db.add(allocation)
+            allocations_created.append(allocation)
+            remaining -= to_allocate
+        
+        if remaining > Decimal("0"):
+            logger.warning(
+                f"Pagamento {payment.id}: {remaining}€ non allocati "
+                f"(credito residuo)"
+            )
+        
+        return allocations_created
+    
     async def _allocate_payment(
         self,
         db: AsyncSession,
@@ -933,145 +1059,85 @@ class InvoiceService:
         Raises:
             BusinessValidationError: importo insufficiente, fattura non trovata, etc.
         """
-        allocations_created = []
-        
         if strategy == "manual":
-            # Allocazione manuale esplicita
             if not manual_allocations:
-                raise BusinessValidationError("Strategy 'manual' richiede lista allocations")
-            
-            total_to_allocate = sum(Decimal(str(a["amount"])) for a in manual_allocations)
-            if total_to_allocate > payment.amount:
                 raise BusinessValidationError(
-                    f"Somma allocazioni ({total_to_allocate}) supera importo pagamento ({payment.amount})"
+                    "Strategy 'manual' richiede lista allocations"
                 )
-            
-            for alloc_data in manual_allocations:
-                invoice_id = alloc_data["invoice_id"]
-                amount = Decimal(str(alloc_data["amount"]))
-                
-                # Verifica fattura esiste e appartiene al cliente
-                stmt = select(Invoice).where(
-                    Invoice.id == invoice_id,
-                    Invoice.client_id == payment.client_id
-                ).options(selectinload(Invoice.payment_allocations))
-                
-                result = await db.execute(stmt)
-                invoice = result.scalar_one_or_none()
-                
-                if not invoice:
-                    raise NotFoundError(f"Fattura {invoice_id} non trovata o non appartiene al cliente")
-                
-                # Verifica che non si paghi più del dovuto
-                if amount > invoice.remaining_amount:
-                    raise BusinessValidationError(
-                        f"Fattura {invoice.invoice_number}: importo allocato ({amount}) "
-                        f"supera residuo ({invoice.remaining_amount})"
-                    )
-                
-                # Crea allocazione
-                allocation = PaymentAllocation(
-                    payment_id=payment.id,
-                    invoice_id=invoice_id,
-                    amount=amount
-                )
-                db.add(allocation)
-                allocations_created.append(allocation)
-        
-        elif strategy == "fifo":
-            # Allocazione automatica FIFO (fatture più vecchie prima)
-            stmt = select(Invoice).where(
-                Invoice.client_id == payment.client_id
-            ).options(
-                selectinload(Invoice.payment_allocations)
-            ).order_by(Invoice.invoice_date.asc())
-            
-            result = await db.execute(stmt)
-            invoices = result.scalars().all()
-            
-            # Filtra solo fatture con residuo > 0
-            open_invoices = [inv for inv in invoices if inv.remaining_amount > Decimal("0")]
-            
-            if not open_invoices:
-                raise BusinessValidationError("Nessuna fattura aperta da pagare per questo cliente")
-            
-            remaining = payment.amount
-            
-            for invoice in open_invoices:
-                if remaining <= Decimal("0"):
-                    break
-                
-                to_allocate = min(remaining, invoice.remaining_amount)
-                
-                allocation = PaymentAllocation(
-                    payment_id=payment.id,
-                    invoice_id=invoice.id,
-                    amount=to_allocate
-                )
-                db.add(allocation)
-                allocations_created.append(allocation)
-                
-                remaining -= to_allocate
-            
-            # P0-Fix 6: Segnala overpayment
-            if remaining > Decimal("0"):
-                logger.warning(
-                    f"Pagamento {payment.id}: {remaining}€ non allocati (credito residuo)"
-                )
-        
-        elif strategy == "overdue_first":
-            # Prima le scadute, poi FIFO sulle altre
-            stmt = select(Invoice).where(
-                Invoice.client_id == payment.client_id
-            ).options(
-                selectinload(Invoice.payment_allocations)
-            ).order_by(
-                # Prima le scadute (due_date < oggi)
-                (Invoice.due_date < date.today()).desc(),
-                # Poi per data fattura
-                Invoice.invoice_date.asc()
-            )
-            
-            result = await db.execute(stmt)
-            invoices = result.scalars().all()
-            
-            open_invoices = [inv for inv in invoices if inv.remaining_amount > Decimal("0")]
-            
-            if not open_invoices:
-                raise BusinessValidationError("Nessuna fattura aperta da pagare")
-            
-            remaining = payment.amount
-            
-            for invoice in open_invoices:
-                if remaining <= Decimal("0"):
-                    break
-                
-                to_allocate = min(remaining, invoice.remaining_amount)
-                
-                allocation = PaymentAllocation(
-                    payment_id=payment.id,
-                    invoice_id=invoice.id,
-                    amount=to_allocate
-                )
-                db.add(allocation)
-                allocations_created.append(allocation)
-                
-                remaining -= to_allocate
-            
-            # P0-Fix 6: Segnala overpayment
-            if remaining > Decimal("0"):
-                logger.warning(
-                    f"Pagamento {payment.id}: {remaining}€ non allocati (credito residuo)"
-                )
-        
+            return await self._allocate_manual(db, payment, manual_allocations)
+        elif strategy in ("fifo", "overdue_first"):
+            return await self._allocate_auto(db, payment, strategy)
         else:
-            raise BusinessValidationError(f"Strategia allocazione '{strategy}' non supportata")
+            raise BusinessValidationError(
+                f"Strategia allocazione '{strategy}' non supportata"
+            )
+
+    async def _allocate_manual(
+        self,
+        db: AsyncSession,
+        payment: Payment,
+        manual_allocations: list[dict],
+    ) -> list[PaymentAllocation]:
+        """Allocazione manuale esplicita su fatture specifiche."""
         
-        await db.flush()
+        total_to_allocate = sum(Decimal(str(a["amount"])) for a in manual_allocations)
+        if total_to_allocate > payment.amount:
+            raise BusinessValidationError(
+                f"Somma allocazioni ({total_to_allocate}) "
+                f"supera importo pagamento ({payment.amount})"
+            )
         
-        # Refresh per caricare relazioni
-        for alloc in allocations_created:
-            await db.refresh(alloc, ["payment", "invoice"])
+        # Lock tutte le fatture coinvolte in una sola query
+        invoice_ids = [a["invoice_id"] for a in manual_allocations]
+        lock_stmt = (
+            select(Invoice)
+            .where(Invoice.id.in_(invoice_ids))
+            .with_for_update()
+            .options(selectinload(Invoice.payment_allocations))
+        )
+        lock_result = await db.execute(lock_stmt)
+        locked_invoices = {
+            inv.id: inv for inv in lock_result.scalars().all()
+        }
+        
+        # SVC-2: Track allocated amount per invoice in batch to handle duplicates
+        allocations_created = []
+        batch_allocated: dict[uuid.UUID, Decimal] = {}
+        
+        for alloc_data in manual_allocations:
+            invoice_id = alloc_data["invoice_id"]
+            amount = Decimal(str(alloc_data["amount"]))
+            
+            invoice = locked_invoices.get(invoice_id)
+            if not invoice:
+                raise NotFoundError(
+                    f"Fattura {invoice_id} non trovata"
+                )
+            if invoice.client_id != payment.client_id:
+                raise BusinessValidationError(
+                    f"Fattura {invoice_id} non appartiene al cliente"
+                )
+            
+            # FIX: Track allocated amount in this batch to handle duplicates
+            already_in_batch = batch_allocated.get(invoice_id, Decimal("0"))
+            effective_remaining = invoice.remaining_amount - already_in_batch
+            
+            if amount > effective_remaining:
+                raise BusinessValidationError(
+                    f"Fattura {invoice.invoice_number}: "
+                    f"importo allocato ({amount}) "
+                    f"supera residuo effettivo ({effective_remaining})"
+                )
+            
+            # Crea allocazione
+            allocation = PaymentAllocation(
+                payment_id=payment.id,
+                invoice_id=invoice_id,
+                amount=amount
+            )
+            db.add(allocation)
+            allocations_created.append(allocation)
+            batch_allocated[invoice_id] = already_in_batch + amount
         
         return allocations_created
 

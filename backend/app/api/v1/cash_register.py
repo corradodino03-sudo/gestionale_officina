@@ -4,7 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
+from app.core.database import get_db
 from app.schemas.cash_register import (
     CashRegisterCloseCreate,
     CashRegisterCloseRead,

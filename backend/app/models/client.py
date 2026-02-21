@@ -5,6 +5,8 @@ Progetto: Garage Manager (Gestionale Officina)
 Rappresenta l'anagrafica dei clienti (persone fisiche e giuridiche).
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, List
 
 from sqlalchemy import Boolean, Float, Index, Integer, String, Text

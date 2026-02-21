@@ -8,6 +8,8 @@ Contiene:
 - Payment: Pagamenti registrati sulla fattura
 """
 
+from __future__ import annotations
+
 import uuid
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP

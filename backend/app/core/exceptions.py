@@ -116,9 +116,11 @@ class DuplicateError(AppException):
         super().__init__(detail, error_code, extra)
 
 
-class BusinessValidationError(AppException):
+class BusinessValidationError(ValueError, AppException):
     """
     Eccezione sollevata per violazioni delle regole di business logic.
+    
+    Eredita da ValueError per essere catturata dai validatori Pydantic.
     
     NON confondere con pydantic.ValidationError che gestisce
     la validazione dello schema/formato dei dati in input.
@@ -147,7 +149,8 @@ class BusinessValidationError(AppException):
             error_code: Identificativo univoco (default: "BUSINESS_VALIDATION_ERROR")
             extra: Dati aggiuntivi da passare al frontend (default: None)
         """
-        super().__init__(detail, error_code, extra)
+        # Chiama AppException.__init__ direttamente per evitare ValueError
+        AppException.__init__(self, detail, error_code, extra)
 
 
 # Alias per compatibilità

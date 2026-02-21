@@ -5,11 +5,14 @@ Progetto: Garage Manager (Gestionale Officina)
 Definisce le impostazioni dell'applicazione caricate da variabili d'ambiente.
 """
 
+from __future__ import annotations
+
+import logging
 from functools import lru_cache
 from typing import Literal
 from decimal import Decimal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +22,10 @@ class Settings(BaseSettings):
 
     Carica le impostazioni da variabili d'ambiente.
     Valori di default adatti per sviluppo locale.
+
+    Per ottenere un'istanza singleton:
+    - In FastAPI: usa `Depends(get_settings)` per Dependency Injection
+    - Altrove: usa `get_settings()` direttamente
     """
 
     model_config = SettingsConfigDict(
@@ -26,6 +33,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        frozen=True,  # CFG-2: Impedisce mutazioni accidentali dopo la creazione
     )
 
     # ------------------------------------------------------------
@@ -65,7 +73,7 @@ class Settings(BaseSettings):
     )
 
     debug: bool = Field(
-        default=True,
+        default=False,  # SEC-2: Default sicuro per produzione
         description="Modalità debug",
     )
 
@@ -73,17 +81,6 @@ class Settings(BaseSettings):
         default="changeme-in-production",
         description="Chiave segreta per sessioni/token",
     )
-
-    @field_validator("secret_key")
-    @classmethod
-    def validate_secret_key(cls, v: str) -> str:
-        if v == "changeme-in-production":
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "⚠️  SECRET_KEY non impostata — usa un valore sicuro in produzione"
-            )
-        return v
 
     backend_port: int = Field(
         default=8000,
@@ -117,11 +114,6 @@ class Settings(BaseSettings):
         description="Ragione sociale per fatture",
     )
 
-    invoice_tax_id: str = Field(
-        default="",
-        description="Partita IVA",
-    )
-
     invoice_iban: str = Field(
         default="",
         description="IBAN per pagamenti con bonifico",
@@ -144,7 +136,7 @@ class Settings(BaseSettings):
 
     invoice_vat_number: str = Field(
         default="",
-        description="P.IVA officina",
+        description="Partita IVA officina (formato: IT + 11 cifre, es. IT01234567890)",
     )
 
     invoice_rea_number: str | None = Field(
@@ -191,7 +183,7 @@ class Settings(BaseSettings):
     )
 
     backup_path: str = Field(
-        default="./backups",
+        default="/var/lib/garage-manager/backups",  # CFG-6: Percorso assoluto
         description="Percorso cartella backup",
     )
 
@@ -210,6 +202,94 @@ class Settings(BaseSettings):
         """Verifica se l'applicazione è in sviluppo."""
         return self.app_env == "development"
 
+    # ------------------------------------------------------------
+    # Validatori
+    # ------------------------------------------------------------
+
+    @field_validator("invoice_vat_number")
+    @classmethod
+    def validate_invoice_vat_number(cls, v: str) -> str:
+        """Valida il formato della partita IVA (IT + 11 cifre)."""
+        if v and not v.strip():
+            return v
+        if v and not v.upper().startswith("IT"):
+            raise ValueError("La partita IVA deve iniziare con 'IT'")
+        if v and len(v) != 13:
+            raise ValueError("La partita IVA deve avere 13 caratteri (IT + 11 cifre)")
+        if v and not v[2:].isdigit():
+            raise ValueError("La partita IVA deve contenere 11 cifre dopo 'IT'")
+        return v.upper()
+
+    @field_validator("invoice_iban")
+    @classmethod
+    def validate_invoice_iban(cls, v: str) -> str:
+        """Valida il formato dell'IBAN italiano."""
+        if v and not v.strip():
+            return v
+        if v and not v.upper().startswith("IT"):
+            raise ValueError("L'IBAN italiano deve iniziare con 'IT'")
+        if v and len(v) != 27:
+            raise ValueError("L'IBAN italiano deve avere 27 caratteri")
+        return v.upper()
+
+    @field_validator("stamp_duty_amount", "stamp_duty_threshold", mode="before")
+    @classmethod
+    def convert_decimal_from_string(cls, v) -> Decimal:
+        """Gestisce input con virgola convertendolo in punto."""
+        if v is None:
+            return v
+        if isinstance(v, str):
+            # Sostituisci virgola con punto
+            v = v.replace(",", ".")
+        return Decimal(str(v))
+
+    @field_validator("backup_path")
+    @classmethod
+    def validate_backup_path(cls, v: str) -> str:
+        """Emette warning se il path è relativo."""
+        if v and not v.startswith("/"):
+            logging.getLogger(__name__).warning(
+                f"⚠️  backup_path è relativo: {v}. Usa un percorso assoluto in produzione."
+            )
+        return v
+
+    @model_validator(mode="after")
+    def validate_production_settings(self) -> "Settings":
+        """
+        SEC-1: Validazione settings obbligatori in produzione.
+        CFG-3: Validazione CORS in produzione.
+        """
+        if self.app_env != "production":
+            return self
+
+        errors = []
+
+        # SEC-1: Blocco credenziali di default
+        if self.secret_key == "changeme-in-production" or len(self.secret_key) < 32:
+            errors.append("- secret_key: deve essere cambiato e avere almeno 32 caratteri")
+
+        if "changeme" in self.database_url.lower():
+            errors.append("- database_url: non deve contenere 'changeme'")
+
+        if not self.invoice_vat_number or not self.invoice_vat_number.strip():
+            errors.append("- invoice_vat_number: obbligatorio in produzione")
+
+        if self.debug:
+            errors.append("- debug: deve essere False in produzione")
+
+        # CFG-3: Validazione CORS in produzione
+        for origin in self.cors_origins:
+            if "localhost" in origin or "127.0.0.1" in origin:
+                errors.append(
+                    f"- cors_origins: l'origine '{origin}' non è consentita in produzione"
+                )
+
+        if errors:
+            error_msg = "Errore di configurazione in produzione:\n" + "\n".join(errors)
+            raise ValueError(error_msg)
+
+        return self
+
 
 @lru_cache()
 def get_settings() -> Settings:
@@ -226,5 +306,5 @@ def get_settings() -> Settings:
     return Settings()
 
 
-# Istanza globale per compatibilità con import diretti
+# Istanza singleton delle impostazioni per uso diretto in modulo
 settings = get_settings()

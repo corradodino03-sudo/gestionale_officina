@@ -6,6 +6,8 @@ Le dichiarazioni di intento (ex art. 1, c. 100, L. 244/2007) permettono
 agli esportatori abituali di acquistare senza IVA fino ad un plafond dichiarato.
 """
 
+from __future__ import annotations
+
 import uuid
 from datetime import date
 from decimal import Decimal

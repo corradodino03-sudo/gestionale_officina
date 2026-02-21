@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -25,7 +25,7 @@ class CashRegisterCloseRead(CashRegisterSummary):
     closed_by: Optional[str]
     notes: Optional[str]
     is_reconciled: bool
-    created_at: date
-    updated_at: date
+    created_at: datetime
+    updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

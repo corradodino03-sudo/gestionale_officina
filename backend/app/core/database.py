@@ -74,13 +74,19 @@ async def init_db() -> None:
     """
     Inizializza la connessione al database.
 
-    Esegue un test di connessione per verificare
-    che il database sia raggiungibile.
+    Esegue un test di connessione e crea le tabelle se non esistono.
     """
     try:
         async with engine.begin() as conn:
             # Test connessione
             await conn.execute(text("SELECT 1"))
+            
+            # Crea le tabelle se non esistono
+            from app.models import Base
+            # Usa checkfirst=True (default) per non creare se esistono
+            await conn.run_sync(Base.metadata.create_all)
+            logger.info("Tabelle database create/verificate con successo")
+            
         logger.info("Connessione al database stabilita con successo")
     except Exception as e:
         logger.error("Errore connessione database: %s", e)

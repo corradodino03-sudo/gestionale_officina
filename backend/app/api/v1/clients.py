@@ -75,7 +75,7 @@ async def get_clients(
     Args:
         page: Numero pagina (default 1)
         per_page: Elementi per pagina (default 10, max 100)
-        search: Termine di ricerca opzionale su nome, cognome, tax_id, telefono, email
+        search: Termine di ricerca opzionale su nome, cognome, codice fiscale, partita IVA, telefono, email
         include_inactive: Se True, include anche i clienti eliminati (soft-deleted)
         db: Sessione database
         service: Istanza del ClientService (iniettata automaticamente)
@@ -159,7 +159,7 @@ async def create_client(
         ClientRead: Dettagli del cliente creato
         
     Raises:
-        DuplicateError: Se il tax_id è già in uso
+        DuplicateError: Se codice fiscale o partita IVA sono già in uso
     """
     client = await service.create(db=db, client_data=client_data)
     await db.commit()
@@ -194,7 +194,7 @@ async def update_client(
         
     Raises:
         NotFoundError: Se il cliente non esiste
-        DuplicateError: Se il tax_id è già in uso
+        DuplicateError: Se codice fiscale o partita IVA sono già in uso
     """
     client = await service.update(
         db=db,

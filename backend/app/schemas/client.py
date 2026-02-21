@@ -67,6 +67,14 @@ class VatRegime(str, Enum):
     RF19 = "RF19"   # Forfettario
 
 
+class ClientType(str, Enum):
+    """Tipo di cliente."""
+    PRIVATE    = "private"     # Persona fisica privata
+    COMPANY    = "company"     # Azienda / Società
+    FREELANCER = "freelancer"  # Libero professionista
+    PA         = "pa"          # Ente Pubblico (PA)
+
+
 # -------------------------------------------------------------------
 # Funzioni di normalizzazione e validazione
 # -------------------------------------------------------------------
@@ -225,24 +233,37 @@ def _validate_codice_fiscale(tax_id: str) -> None:
         )
 
 
-def normalize_tax_id_basic(tax_id: Optional[str]) -> Optional[str]:
+def normalize_fiscal_code_basic(fiscal_code: Optional[str]) -> Optional[str]:
     """
-    Normalizza il Tax ID con solo strip e uppercase.
+    Normalizza il Codice Fiscale: strip e uppercase.
     
-    Questa funzione viene usata come validator base. La validazione
-    rigorosa (11 cifre + Luhn per P.IVA, 16 caratteri per CF)
-    viene eseguita nel model_validator per clienti italiani.
+    La validazione rigorosa (struttura + checksum) viene eseguita
+    nel model_validator per clienti italiani.
     
     Args:
-        tax_id: Codice Fiscale o Partita IVA
+        fiscal_code: Codice Fiscale italiano
         
     Returns:
         Valore normalizzato o None
     """
-    if tax_id is None:
+    if fiscal_code is None:
         return None
+    return fiscal_code.strip().upper()
+
+
+def normalize_vat_number_basic(vat_number: Optional[str]) -> Optional[str]:
+    """
+    Normalizza la Partita IVA: strip (solo cifre, nessun uppercase necessario).
     
-    return tax_id.strip().upper()
+    Args:
+        vat_number: Partita IVA italiana (11 cifre)
+        
+    Returns:
+        Valore normalizzato o None
+    """
+    if vat_number is None:
+        return None
+    return vat_number.strip()
 
 
 # -------------------------------------------------------------------
@@ -280,7 +301,10 @@ class ClientValidatorsMixin(BaseModel):
     
     # Stub per campi usati nel validator (senza Field, solo type hints)
     # Le classi figlie li sovrascriveranno con Field completi
-    tax_id: Optional[str] = None
+    fiscal_code: Optional[str] = None
+    vat_number: Optional[str] = None
+    client_type: Optional[str] = None
+    gdpr_consent: Optional[bool] = None
     is_foreign: Optional[bool] = None
     country_code: Optional[str] = None
     sdi_code: Optional[str] = None
@@ -288,18 +312,24 @@ class ClientValidatorsMixin(BaseModel):
     vat_exemption: Optional[bool] = None
     vat_exemption_code: Optional[VatExemptionCode] = None
     split_payment: Optional[bool] = None
-    is_company: Optional[bool] = None
     credit_limit_action: Optional[str] = None
     
     # NOTA: Dichiarazione campi rimossa per evitare conflitti di ereditarietà.
     # I validator usano check_fields=False per funzionare correttamente.
     
-    # Validator base per tax_id: solo strip e uppercase (validazione rigorosa nel model_validator)
-    _normalize_tax_id = field_validator(
-        "tax_id", 
+    # Validator base per fiscal_code: strip e uppercase
+    _normalize_fiscal_code = field_validator(
+        "fiscal_code",
         mode="before",
         check_fields=False
-    )(normalize_tax_id_basic)
+    )(normalize_fiscal_code_basic)
+
+    # Validator base per vat_number: strip
+    _normalize_vat_number = field_validator(
+        "vat_number",
+        mode="before",
+        check_fields=False
+    )(normalize_vat_number_basic)
     
     _normalize_phone = field_validator(
         "phone", 
@@ -364,7 +394,7 @@ class ClientValidatorsMixin(BaseModel):
     @model_validator(mode="after")
     def validate_fiscal_consistency(self) -> "ClientValidatorsMixin":
         """
-        Valida la coerenza tra i campi fiscali.
+        Valida la coerenza tra i campi fiscali e GDPR.
         
         Distingue tra:
         - CREATE (ClientBase/ClientCreate): validazione completa su tutti i campi
@@ -372,72 +402,97 @@ class ClientValidatorsMixin(BaseModel):
           usando model_fields_set per evitare falsi positivi
         
         Include:
-        - Validazione rigorosa tax_id (P.IVA/CF) SOLO per clienti italiani
+        - Validazione fiscal_code (16 char alfanumerici o 11 cifre per aziende)
+        - Validazione vat_number (11 cifre + checksum Luhn) — SOLO per clienti italiani
+        - Obbligatorietà campi fiscali per tipo cliente
         - Controllo sdi_code vs pec
         - Controllo vat_exemption vs vat_exemption_code
-        - Controllo split_payment vs is_company
+        - Controllo split_payment vs client_type
         """
         # Determina se siamo in un update parziale (PATCH)
-        # Usa il nome della classe per evitare conflitti di ereditarietà
         is_partial_update = self.__class__.__name__ == "ClientUpdate"
         
         def field_is_relevant(field_name: str) -> bool:
             """
             Ritorna True se il campo deve essere validato.
-            
-            - In CREATE: sempre True (tutti i campi hanno un valore, 
-              anche se default)
+            - In CREATE: sempre True
             - In UPDATE: True solo se il campo è nel payload inviato
             """
             if not is_partial_update:
                 return True
             return field_name in self.model_fields_set
         
-        # ----------------------------------------------------------------
-        # Validazione Tax ID rigorosa - SOLO per clienti italiani
-        # ----------------------------------------------------------------
-        # La validazione rigorosa (11 cifre + Luhn per P.IVA, 16 caratteri per CF)
-        # viene eseguita solo se:
-        # - is_foreign non è True (quindi False o None)
-        # - country_code è "IT" o None
-        if self.tax_id and field_is_relevant("tax_id"):
-            # FIX: se country_code è None in un update parziale, assumiamo IT se il campo non è nel payload
-            effective_country_code = self.country_code
-            if effective_country_code is None and not field_is_relevant("country_code"):
-                effective_country_code = "IT"
+        # Determina il client_type effettivo
+        effective_client_type = self.client_type or "private"
 
-            is_italian = (
-                self.is_foreign is not True
-                and effective_country_code in ("IT", None)
-            )
-            
-            if is_italian:
-                tax_id = self.tax_id
-                
-                # Partita IVA: esattamente 11 cifre
-                if len(tax_id) == 11 and tax_id.isdigit():
-                    # Validazione Luhn per P.IVA italiana
-                    if not _luhn_check_piva(tax_id):
-                        raise BusinessValidationError(
-                            "Partita IVA non valida: cifra di controllo errata"
-                        )
-                # Codice Fiscale: 16 caratteri alfanumerici
-                elif len(tax_id) == 16 and re.match(r"^[A-Z0-9]+$", tax_id):
-                    _validate_codice_fiscale(tax_id)
-                else:
+        # ----------------------------------------------------------------
+        # Validazione CODICE FISCALE — SOLO per clienti italiani
+        # ----------------------------------------------------------------
+        effective_country_code = self.country_code
+        if effective_country_code is None and not field_is_relevant("country_code"):
+            effective_country_code = "IT"
+
+        is_italian = (
+            self.is_foreign is not True
+            and effective_country_code in ("IT", None)
+        )
+
+        if self.fiscal_code and field_is_relevant("fiscal_code") and is_italian:
+            fc = self.fiscal_code  # già normalizzato uppercase
+            # Accetta: 16 char alfanumerici (PF) oppure 11 cifre (aziende = uguale a P.IVA)
+            if len(fc) == 16 and re.match(r"^[A-Z0-9]+$", fc):
+                _validate_codice_fiscale(fc)
+            elif len(fc) == 11 and fc.isdigit():
+                # Codice fiscale numerico (coincide con P.IVA per le società)
+                pass  # Valido per aziende
+            else:
+                raise BusinessValidationError(
+                    "Codice Fiscale non valido: deve essere 16 caratteri alfanumerici (persone fisiche) "
+                    "o 11 cifre numeriche (aziende/coincidente con P.IVA)"
+                )
+
+        # ----------------------------------------------------------------
+        # Validazione PARTITA IVA — SOLO per clienti italiani
+        # ----------------------------------------------------------------
+        if self.vat_number and field_is_relevant("vat_number") and is_italian:
+            piva = self.vat_number
+            if not piva.isdigit() or len(piva) != 11:
+                raise BusinessValidationError(
+                    "Partita IVA non valida: deve essere esattamente 11 cifre numeriche"
+                )
+            if not _luhn_check_piva(piva):
+                raise BusinessValidationError(
+                    "Partita IVA non valida: cifra di controllo errata (algoritmo Luhn)"
+                )
+
+        # ----------------------------------------------------------------
+        # Obbligatorietà campi fiscali per tipo cliente (solo in CREATE)
+        # ----------------------------------------------------------------
+        if not is_partial_update:
+            if effective_client_type == "private":
+                # Privato: codice fiscale obbligatorio, P.IVA opzionale
+                if not self.fiscal_code and is_italian:
                     raise BusinessValidationError(
-                        "Tax ID non valido per cliente italiano: "
-                        "deve essere 11 cifre (P.IVA) o 16 caratteri (Codice Fiscale)"
+                        "Il codice fiscale è obbligatorio per i clienti privati italiani"
                     )
-        
+            elif effective_client_type in ("company", "freelancer", "pa"):
+                # Azienda/Freelancer/PA: entrambi obbligatori per clienti italiani
+                if is_italian:
+                    if not self.vat_number:
+                        raise BusinessValidationError(
+                            f"La Partita IVA è obbligatoria per i clienti di tipo '{effective_client_type}'"
+                        )
+                    if not self.fiscal_code:
+                        raise BusinessValidationError(
+                            f"Il codice fiscale è obbligatorio per i clienti di tipo '{effective_client_type}'"
+                        )
+
         # ----------------------------------------------------------------
         # Validazione coerenza campi - con supporto per Partial Updates
         # ----------------------------------------------------------------
         
         # 1. Se sdi_code è "0000000", pec è obbligatorio
         if self.sdi_code == "0000000":
-            # In CREATE: pec deve esistere sempre
-            # In UPDATE: valida solo se sdi_code O pec sono nel payload
             if field_is_relevant("sdi_code") or field_is_relevant("pec"):
                 if not self.pec:
                     raise BusinessValidationError(
@@ -454,14 +509,14 @@ class ClientValidatorsMixin(BaseModel):
                         "esenzione è obbligatorio"
                     )
         
-        # 3. Se split_payment è True, is_company non può essere False
-        # Controlla che split_payment sia True E is_company sia esplicitamente False
-        if self.split_payment is True and self.is_company is False:
-            if field_is_relevant("split_payment") or field_is_relevant("is_company"):
-                raise BusinessValidationError(
-                    "Lo split payment si applica solo a enti/aziende "
-                    "(is_company=True)"
-                )
+        # 3. Se split_payment è True, il cliente deve essere di tipo non 'private'
+        if self.split_payment is True:
+            if field_is_relevant("split_payment") or field_is_relevant("client_type"):
+                if effective_client_type == "private":
+                    raise BusinessValidationError(
+                        "Lo split payment si applica solo a enti/aziende "
+                        "(client_type: company, freelancer, pa)"
+                    )
         
         # 4. Log warning se is_foreign=True ma country_code è "IT" o None
         if self.is_foreign is True and self.country_code in ("IT", None):
@@ -476,25 +531,13 @@ class ClientValidatorsMixin(BaseModel):
             self.sdi_code = "XXXXXXX"
         
         # 6. Validazione ZIP code rigorosa - SOLO per clienti italiani
-        if self.zip_code and field_is_relevant("zip_code"):
-            effective_country_code = self.country_code
-            if effective_country_code is None and not field_is_relevant("country_code"):
-                effective_country_code = "IT"
-            
-            is_italian = (
-                self.is_foreign is not True
-                and effective_country_code in ("IT", None)
-            )
-            
-            if is_italian:
-                # Italian CAP: must be exactly 5 numeric digits
-                if not re.match(r"^\d{5}$", self.zip_code):
-                    raise BusinessValidationError(
-                        "Il CAP deve essere esattamente 5 cifre numeriche"
-                    )
+        if self.zip_code and field_is_relevant("zip_code") and is_italian:
+            if not re.match(r"^\d{5}$", self.zip_code):
+                raise BusinessValidationError(
+                    "Il CAP deve essere esattamente 5 cifre numeriche"
+                )
         
-        # 6. Log informativo per reverse charge
-        # Con use_enum_values=True, self.vat_exemption_code è già una stringa
+        # 7. Log informativo per reverse charge
         if self.vat_exemption_code and self.vat_exemption_code.startswith("N6"):
             logger.info(
                 "Cliente con regime reverse charge (codice: %s)",
@@ -537,15 +580,26 @@ class ClientBase(ClientValidatorsMixin):
         description="Cognome (per persone fisiche)",
     )
 
-    is_company: bool = Field(
-        default=False,
-        description="Indica se è una persona giuridica",
+    client_type: ClientType = Field(
+        default=ClientType.PRIVATE,
+        description="Tipo cliente: 'private', 'company', 'freelancer', 'pa'",
     )
 
-    tax_id: Optional[str] = Field(
+    fiscal_code: Optional[str] = Field(
         None,
-        max_length=50,  # Aumentato per supportare VAT ID esteri
-        description="Codice Fiscale (16 char), Partita IVA (11 cifre), o VAT ID estero",
+        max_length=16,
+        description="Codice Fiscale italiano (16 char per PF, 11 cifre per aziende coincide con P.IVA)",
+    )
+
+    vat_number: Optional[str] = Field(
+        None,
+        max_length=11,
+        description="Partita IVA italiana (11 cifre numeriche). Obbligatoria per company/freelancer/pa",
+    )
+
+    gdpr_consent: bool = Field(
+        default=False,
+        description="Il cliente ha dato il consenso al trattamento dati GDPR",
     )
 
     address: Optional[str] = Field(
@@ -752,16 +806,6 @@ class ClientCreate(ClientBase):
     pass
 
 
-# -------------------------------------------------------------------
-# Schema per Creazione
-# -------------------------------------------------------------------
-class ClientCreate(ClientBase):
-    """
-    Schema per la creazione di un nuovo cliente.
-    
-    Eredita da ClientBase (completa con tutti i campi).
-    """
-    pass
 
 
 # -------------------------------------------------------------------
@@ -797,15 +841,26 @@ class ClientUpdate(ClientValidatorsMixin):
         description="Cognome (per persone fisiche)",
     )
 
-    is_company: Optional[bool] = Field(
+    client_type: Optional[ClientType] = Field(
         None,
-        description="Indica se è una persona giuridica",
+        description="Tipo cliente: 'private', 'company', 'freelancer', 'pa'",
     )
 
-    tax_id: Optional[str] = Field(
+    fiscal_code: Optional[str] = Field(
         None,
-        max_length=50,  # Aumentato per supportare VAT ID esteri
-        description="Codice Fiscale (16 char), Partita IVA (11 cifre), o VAT ID estero",
+        max_length=16,
+        description="Codice Fiscale italiano",
+    )
+
+    vat_number: Optional[str] = Field(
+        None,
+        max_length=11,
+        description="Partita IVA italiana (11 cifre numeriche)",
+    )
+
+    gdpr_consent: Optional[bool] = Field(
+        None,
+        description="Consenso GDPR del cliente",
     )
 
     address: Optional[str] = Field(
@@ -997,7 +1052,8 @@ class ClientRead(ClientBase):
     """
     Schema per la risposta API che include i campi di sistema.
     
-    Include id, created_at, updated_at.
+    Include id, created_at, updated_at, gdpr_consent_date, gdpr_withdraw_date
+    e il campo calcolato is_company per retrocompatibilità.
     
     Nota: model_config è ereditato da ClientBase.
     """
@@ -1016,6 +1072,30 @@ class ClientRead(ClientBase):
         ...,
         description="Data/ora ultimo aggiornamento",
     )
+
+    gdpr_consent_date: Optional[datetime.datetime] = Field(
+        None,
+        description="Data/ora in cui il consenso GDPR è stato dato",
+    )
+
+    gdpr_withdraw_date: Optional[datetime.datetime] = Field(
+        None,
+        description="Data/ora in cui il consenso GDPR è stato revocato",
+    )
+
+    @computed_field
+    @property
+    def is_company(self) -> bool:
+        """
+        Campo calcolato per retrocompatibilità.
+        
+        True se client_type è 'company', 'freelancer' o 'pa'.
+        """
+        ct = self.client_type
+        if isinstance(ct, ClientType):
+            return ct in (ClientType.COMPANY, ClientType.FREELANCER, ClientType.PA)
+        # Gestisce il caso in cui use_enum_values=True ha già convertito in stringa
+        return ct in ("company", "freelancer", "pa")
 
 
 # -------------------------------------------------------------------

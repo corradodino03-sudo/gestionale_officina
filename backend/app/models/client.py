@@ -7,9 +7,10 @@ Rappresenta l'anagrafica dei clienti (persone fisiche e giuridiche).
 
 
 from __future__ import annotations
+import datetime
 from typing import Optional, TYPE_CHECKING, List
 
-from sqlalchemy import Boolean, Float, Index, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models import Base
@@ -27,15 +28,19 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """
     Modello per l'anagrafica clienti.
     
-    Gestisce sia persone fisiche che giuridiche (aziende).
+    Gestisce persone fisiche, aziende, professionisti e PA.
     Un cliente può avere più veicoli e più ordini di lavoro associati.
     
     Attributes:
         id: UUID primary key, generato automaticamente
         name: Nome o ragione sociale (obbligatorio)
         surname: Cognome (opzionale, per persone fisiche)
-        is_company: Indica se è una persona giuridica
-        tax_id: Codice Fiscale (16 char) o Partita IVA (11 cifre)
+        client_type: Tipo cliente: 'private', 'company', 'freelancer', 'pa'
+        fiscal_code: Codice Fiscale italiano (16 char alfanumerici per PF, 11 cifre per aziende)
+        vat_number: Partita IVA italiana (11 cifre, solo aziende/professionisti)
+        gdpr_consent: Consenso al trattamento dati GDPR
+        gdpr_consent_date: Data di raccolta del consenso GDPR
+        gdpr_withdraw_date: Data di revoca del consenso GDPR
         address: Indirizzo completo
         city: Città
         zip_code: CAP
@@ -49,6 +54,9 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     Relationships:
         vehicles: Veicoli associati al cliente
         work_orders: Ordini di lavoro associati al cliente
+    
+    Properties:
+        is_company: True se client_type in ('company', 'freelancer', 'pa')
     """
 
     __tablename__ = "clients"
@@ -68,18 +76,25 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         doc="Cognome (per persone fisiche)",
     )
 
-    is_company: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
+    client_type: Mapped[str] = mapped_column(
+        String(10),
         nullable=False,
-        doc="Indica se è una persona giuridica",
+        default="private",
+        doc="Tipo cliente: 'private', 'company', 'freelancer', 'pa'",
     )
 
-    tax_id: Mapped[Optional[str]] = mapped_column(
+    fiscal_code: Mapped[Optional[str]] = mapped_column(
         String(16),
-        unique=True,
         nullable=True,
-        doc="Codice Fiscale (16 char) o Partita IVA (11 cifre)",
+        index=True,
+        doc="Codice Fiscale italiano (RSSMRA85T10H501Z per PF, 11 cifre coincidenti con P.IVA per aziende)",
+    )
+
+    vat_number: Mapped[Optional[str]] = mapped_column(
+        String(11),
+        nullable=True,
+        index=True,
+        doc="Partita IVA italiana (11 cifre numeriche). Nullable: i privati non ce l'hanno.",
     )
 
     # ------------------------------------------------------------
@@ -131,6 +146,28 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         Text,
         nullable=True,
         doc="Note aggiuntive sul cliente",
+    )
+
+    # ------------------------------------------------------------
+    # Colonne GDPR
+    # ------------------------------------------------------------
+    gdpr_consent: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        doc="Il cliente ha dato il consenso al trattamento dati GDPR",
+    )
+
+    gdpr_consent_date: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Data/ora in cui il consenso GDPR è stato dato",
+    )
+
+    gdpr_withdraw_date: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Data/ora in cui il consenso GDPR è stato revocato",
     )
 
     # ------------------------------------------------------------
@@ -359,13 +396,38 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         }
 
     # ------------------------------------------------------------
-    # Indici
+    # Properties Calcolate — Retrocompatibilità
+    # ------------------------------------------------------------
+    @property
+    def is_company(self) -> bool:
+        """
+        Retrocompatibilità: True se il cliente è un'azienda, libero professionista o PA.
+        
+        Calcolato da client_type:
+          - 'company'    → True
+          - 'freelancer' → True
+          - 'pa'         → True
+          - 'private'    → False
+        """
+        return self.client_type in ("company", "freelancer", "pa")
+
+    # ------------------------------------------------------------
+    # Indici e Constraint
     # ------------------------------------------------------------
     __table_args__ = (
+        # Indice composito nome+cognome per ricerca rapida
         Index("ix_clients_name_surname", "name", "surname"),
-        Index("ix_clients_tax_id", "tax_id"),
+        # Indice codice SDI
         Index("ix_clients_sdi_code", "sdi_code"),
+        # Indice combinato per filtri esteri/esenzione IVA
         Index("ix_clients_foreign_vat_exemption", "is_foreign", "vat_exemption"),
+        # Indice per client_type (ricerca per tipo cliente)
+        Index("ix_clients_client_type", "client_type"),
+        # CHECK constraint: valori ammessi per client_type
+        CheckConstraint(
+            "client_type IN ('private', 'company', 'freelancer', 'pa')",
+            name="ck_clients_client_type",
+        ),
     )
 
     # ------------------------------------------------------------
@@ -378,6 +440,6 @@ class Client(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         Returns:
             Stringa che identifica il cliente
         """
-        if self.is_company:
-            return f"<Client(id={self.id}, company={self.name})>"
-        return f"<Client(id={self.id}, name={self.name} {self.surname})>"
+        if self.client_type in ("company", "pa"):
+            return f"<Client(id={self.id}, type={self.client_type}, company={self.name})>"
+        return f"<Client(id={self.id}, type={self.client_type}, name={self.name} {self.surname})>"

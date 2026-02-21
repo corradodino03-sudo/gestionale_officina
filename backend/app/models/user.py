@@ -112,11 +112,9 @@ class User(Base):
         doc="Data/ora ultimo aggiornamento del record",
     )
 
-    # Indici
+    # Indici - Note: l'indice su email è già creato automaticamente da unique=True
     __table_args__ = (
-        Index("ix_users_email", "email"),
         Index("ix_users_role", "role"),
-        # Check constraint per il ruolo (a livello applicativo in SQLAlchemy 2.0)
     )
 
     def __repr__(self) -> str:

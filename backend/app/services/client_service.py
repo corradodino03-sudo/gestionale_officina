@@ -11,6 +11,7 @@ Ottimizzato per installazione on-premise con focus su:
 - Dependency Injection ready
 """
 
+import datetime
 import logging
 import uuid
 from typing import Optional
@@ -84,7 +85,8 @@ class ClientService:
             search_condition = or_(
                 Client.name.ilike(search_term),
                 Client.surname.ilike(search_term),
-                Client.tax_id.ilike(search_term),
+                Client.fiscal_code.ilike(search_term),
+                Client.vat_number.ilike(search_term),
                 Client.phone.ilike(search_term),
                 Client.email.ilike(search_term),
             )
@@ -164,8 +166,9 @@ class ClientService:
         """
         Crea un nuovo cliente.
         
-        Implementa validazione proattiva: verifica che il tax_id
-        non sia già in uso prima di creare il record.
+        Implementa validazione proattiva: verifica che fiscal_code e vat_number
+        non siano già in uso prima di creare il record.
+        Gestisce automaticamente gdpr_consent_date quando gdpr_consent=True.
         
         Args:
             db: Sessione database
@@ -175,28 +178,42 @@ class ClientService:
             Oggetto Client appena creato
             
         Raises:
-            DuplicateError: Se il tax_id è già in uso
+            DuplicateError: Se fiscal_code o vat_number è già in uso
             ConflictError: Se il database genera un errore imprevisto
         """
-        # Estrai il tax_id per la validazione proattiva
-        tax_id = client_data.tax_id
-        
-        # Validazione Proattiva: verifica duplicato tax_id PRIMA di creare
-        if tax_id:
-            existing = await self._check_tax_id_exists(db, tax_id)
+        # Validazione Proattiva: verifica duplicati PRIMA di creare
+        if client_data.fiscal_code:
+            existing = await self._check_fiscal_code_exists(db, client_data.fiscal_code)
             if existing:
                 logger.warning(
-                    "Tentativo di creare cliente con tax_id duplicato: %s (esistente: %s)",
-                    tax_id, existing.id
+                    "Tentativo di creare cliente con fiscal_code duplicato: %s (esistente: %s)",
+                    client_data.fiscal_code, existing.id
                 )
                 raise DuplicateError(
-                    f"Tax ID '{tax_id}' già registrato per un altro cliente"
+                    f"Codice Fiscale '{client_data.fiscal_code}' già registrato per un altro cliente"
+                )
+
+        if client_data.vat_number:
+            existing = await self._check_vat_number_exists(db, client_data.vat_number)
+            if existing:
+                logger.warning(
+                    "Tentativo di creare cliente con vat_number duplicato: %s (esistente: %s)",
+                    client_data.vat_number, existing.id
+                )
+                raise DuplicateError(
+                    f"Partita IVA '{client_data.vat_number}' già registrata per un altro cliente"
                 )
         
+        # Converti Pydantic model in dict
+        client_dict = client_data.model_dump()
+        
+        # Gestione automatica gdpr_consent_date
+        if client_dict.get("gdpr_consent"):
+            client_dict["gdpr_consent_date"] = datetime.datetime.now(datetime.timezone.utc)
+        
         # ------------------------------------------------------------
-        # Validazione coerenza campi fiscali
+        # Log informativo per regimi speciali
         # ------------------------------------------------------------
-        # Log informativo per regime speciali
         if client_data.is_foreign:
             logger.info(
                 "Creato cliente estero: %s - %s (country_code: %s)",
@@ -214,10 +231,7 @@ class ClientService:
                 "Creato cliente con split payment: %s - %s",
                 client_data.name, client_data.surname or ""
             )
-
-        # Converti Pydantic model in dict
-        client_dict = client_data.model_dump()
-
+        
         # Crea nuovo oggetto (is_active default=True impostato dal mixin)
         client = Client(**client_dict)
 
@@ -227,17 +241,22 @@ class ClientService:
             await db.refresh(client)
 
             logger.info(
-                "Creato nuovo cliente: %s - %s %s (tax_id: %s)",
-                client.id, client.name, client.surname or "", client.tax_id or "N/A"
+                "Creato nuovo cliente: %s - %s %s (type: %s, fiscal_code: %s, vat_number: %s)",
+                client.id, client.name, client.surname or "",
+                client.client_type,
+                client.fiscal_code or "N/A",
+                client.vat_number or "N/A",
             )
             return client
 
         except IntegrityError as e:
             logger.error("Errore IntegrityError creazione cliente: %s - %s", e.__class__.__name__, e.orig)
             await db.rollback()
-            # Mappatura errori del database sulle nostre eccezioni
-            if "tax_id" in str(e.orig).lower():
-                raise DuplicateError("Tax ID già registrato per un altro cliente")
+            err_str = str(e.orig).lower()
+            if "fiscal_code" in err_str:
+                raise DuplicateError("Codice Fiscale già registrato per un altro cliente")
+            if "vat_number" in err_str:
+                raise DuplicateError("Partita IVA già registrata per un altro cliente")
             raise ConflictError("Errore durante la creazione del cliente")
             
         except SQLAlchemyError as e:
@@ -264,27 +283,50 @@ class ClientService:
             
         Raises:
             NotFoundError: Se il cliente non esiste
-            DuplicateError: Se il tax_id è già in uso
+            DuplicateError: Se fiscal_code o vat_number è già in uso
             ConflictError: Se il database genera un errore imprevisto
         """
         # Recupera il cliente esistente (solo attivo)
         client = await self.get_by_id(db, client_id)
 
-        # Estrai il nuovo tax_id per la validazione proattiva
+        # Estrai solo i campi inviati nel payload
         update_data = client_data.model_dump(exclude_unset=True)
-        new_tax_id = update_data.get("tax_id")
-        
-        # Validazione Proattiva: verifica che il nuovo tax_id non sia già in uso
-        if new_tax_id and new_tax_id != client.tax_id:
-            existing = await self._check_tax_id_exists(db, new_tax_id)
+
+        # Validazione Proattiva: verifica unicità fiscal_code
+        new_fiscal_code = update_data.get("fiscal_code")
+        if new_fiscal_code and new_fiscal_code != client.fiscal_code:
+            existing = await self._check_fiscal_code_exists(db, new_fiscal_code, exclude_id=client_id)
             if existing:
                 logger.warning(
-                    "Tentativo di aggiornare cliente %s con tax_id duplicato: %s",
-                    client_id, new_tax_id
+                    "Tentativo di aggiornare cliente %s con fiscal_code duplicato: %s",
+                    client_id, new_fiscal_code
                 )
                 raise DuplicateError(
-                    f"Tax ID '{new_tax_id}' già registrato per un altro cliente"
+                    f"Codice Fiscale '{new_fiscal_code}' già registrato per un altro cliente"
                 )
+
+        # Validazione Proattiva: verifica unicità vat_number
+        new_vat_number = update_data.get("vat_number")
+        if new_vat_number and new_vat_number != client.vat_number:
+            existing = await self._check_vat_number_exists(db, new_vat_number, exclude_id=client_id)
+            if existing:
+                logger.warning(
+                    "Tentativo di aggiornare cliente %s con vat_number duplicato: %s",
+                    client_id, new_vat_number
+                )
+                raise DuplicateError(
+                    f"Partita IVA '{new_vat_number}' già registrata per un altro cliente"
+                )
+
+        # Gestione automatica date GDPR
+        new_gdpr_consent = update_data.get("gdpr_consent")
+        if new_gdpr_consent is True and not client.gdpr_consent:
+            # Consenso appena concesso
+            update_data["gdpr_consent_date"] = datetime.datetime.now(datetime.timezone.utc)
+            update_data["gdpr_withdraw_date"] = None  # Annulla eventuale revoca precedente
+        elif new_gdpr_consent is False and client.gdpr_consent:
+            # Consenso revocato
+            update_data["gdpr_withdraw_date"] = datetime.datetime.now(datetime.timezone.utc)
         
         # ------------------------------------------------------------
         # Log per regime speciali (quando vengono impostati/modificati)
@@ -327,8 +369,11 @@ class ClientService:
         except IntegrityError as e:
             logger.error("Errore IntegrityError aggiornamento cliente: %s - %s", e.__class__.__name__, e.orig)
             await db.rollback()
-            if "tax_id" in str(e.orig).lower():
-                raise DuplicateError("Tax ID già registrato per un altro cliente")
+            err_str = str(e.orig).lower()
+            if "fiscal_code" in err_str:
+                raise DuplicateError("Codice Fiscale già registrato per un altro cliente")
+            if "vat_number" in err_str:
+                raise DuplicateError("Partita IVA già registrata per un altro cliente")
             raise ConflictError("Errore durante l'aggiornamento del cliente")
             
         except SQLAlchemyError as e:
@@ -432,26 +477,54 @@ class ClientService:
     # Metodi privati di supporto
     # ----------------------------------------------------------------
     
-    async def _check_tax_id_exists(
+    async def _check_fiscal_code_exists(
         self,
         db: AsyncSession,
-        tax_id: str,
+        fiscal_code: str,
+        exclude_id: Optional[uuid.UUID] = None,
     ) -> Optional[Client]:
         """
-        Verifica se un tax_id è già in uso.
+        Verifica se un codice fiscale è già in uso (tra i clienti attivi).
         
         Args:
             db: Sessione database
-            tax_id: Codice Fiscale o Partita IVA da verificare
+            fiscal_code: Codice Fiscale da verificare
+            exclude_id: UUID del cliente da escludere (per update)
             
         Returns:
             Oggetto Client se trovato, None altrimenti
         """
-        # Cerca tra i clienti attivi
-        result = await db.execute(
-            select(Client).where(
-                Client.tax_id == tax_id,
-                Client.is_active == True
-            )
+        query = select(Client).where(
+            Client.fiscal_code == fiscal_code,
+            Client.is_active == True,
         )
+        if exclude_id:
+            query = query.where(Client.id != exclude_id)
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+
+    async def _check_vat_number_exists(
+        self,
+        db: AsyncSession,
+        vat_number: str,
+        exclude_id: Optional[uuid.UUID] = None,
+    ) -> Optional[Client]:
+        """
+        Verifica se una Partita IVA è già in uso (tra i clienti attivi).
+        
+        Args:
+            db: Sessione database
+            vat_number: Partita IVA da verificare
+            exclude_id: UUID del cliente da escludere (per update)
+            
+        Returns:
+            Oggetto Client se trovato, None altrimenti
+        """
+        query = select(Client).where(
+            Client.vat_number == vat_number,
+            Client.is_active == True,
+        )
+        if exclude_id:
+            query = query.where(Client.id != exclude_id)
+        result = await db.execute(query)
         return result.scalar_one_or_none()

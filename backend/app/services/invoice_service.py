@@ -168,7 +168,11 @@ class InvoiceService:
             else:
                 bill_to_name = f"{billing_client.name} {billing_client.surname or ''}".strip()
                 
-            bill_to_tax_id = billing_client.tax_id
+            # Fiscale: per aziende/PA priorità a P.IVA, per privati usa Codice Fiscale
+            bill_to_tax_id = (
+                getattr(billing_client, "vat_number", None)
+                or getattr(billing_client, "fiscal_code", None)
+            )
             
             bill_to_address = billing_client.effective_billing_address if hasattr(billing_client, 'effective_billing_address') else (
                 f"{billing_client.address}, {billing_client.city} ({billing_client.province}) {billing_client.zip_code}"
@@ -207,7 +211,11 @@ class InvoiceService:
                 bill_to_name = billing_client.name
             else:
                 bill_to_name = f"{billing_client.name} {billing_client.surname or ''}".strip()
-            bill_to_tax_id = billing_client.tax_id
+            # Fiscale: per aziende/PA priorità a P.IVA, per privati usa Codice Fiscale
+            bill_to_tax_id = (
+                getattr(billing_client, "vat_number", None)
+                or getattr(billing_client, "fiscal_code", None)
+            )
         
         # Step 5: Genera numero fattura
         invoice_date = data.invoice_date or date.today()

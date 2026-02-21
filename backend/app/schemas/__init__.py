@@ -9,6 +9,8 @@ e serializzazione delle risposte API.
 # es: from app.schemas import VehicleRead, ClientRead, etc.
 
 from app.schemas.client import ClientCreate, ClientRead, ClientUpdate
+from app.schemas.user import UserCreate, UserLogin, UserUpdate, UserResponse
+from app.schemas.token import TokenResponse, TokenRefresh, TokenPayload
 from app.schemas.vehicle import (
     FuelType,
     VehicleBase,
@@ -109,6 +111,15 @@ __all__ = [
     "ClientCreate",
     "ClientRead",
     "ClientUpdate",
+    # User schemas
+    "UserCreate",
+    "UserLogin",
+    "UserUpdate",
+    "UserResponse",
+    # Token schemas
+    "TokenResponse",
+    "TokenRefresh",
+    "TokenPayload",
     # Vehicle schemas
     "FuelType",
     "VehicleBase",

@@ -35,6 +35,7 @@ from app.models.invoice import Invoice, InvoiceLine, Payment, PaymentAllocation,
 from app.models.intent_declaration import IntentDeclaration
 from app.models.technician import Technician
 from app.models.cash_register import CashRegisterClose
+from app.models.user import User, UserRole
 
 # Placeholder per import modelli futuri
 # from app.models.vehicle import Vehicle
@@ -63,4 +64,6 @@ __all__ = [
     "Technician",
     "CashRegisterClose",
     "Deposit",
+    "User",
+    "UserRole",
 ]

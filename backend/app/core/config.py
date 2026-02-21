@@ -82,6 +82,21 @@ class Settings(BaseSettings):
         description="Chiave segreta per sessioni/token",
     )
 
+    access_token_expire_minutes: int = Field(
+        default=30,
+        description="Minuti di validità dell'access token JWT",
+    )
+
+    refresh_token_expire_days: int = Field(
+        default=7,
+        description="Giorni di validità del refresh token JWT",
+    )
+
+    jwt_algorithm: str = Field(
+        default="HS256",
+        description="Algoritmo per firma JWT",
+    )
+
     backend_port: int = Field(
         default=8000,
         description="Porta backend",
